@@ -16,7 +16,6 @@ export const MeetingPage: React.FC = () => {
     isVideoMuted,
     isAiSpeaking,
     candidateName,
-    subtitlesText,
     toggleMic,
     toggleVideo,
     endInterview
@@ -135,23 +134,21 @@ export const MeetingPage: React.FC = () => {
               ) : (
                 <Mic className="w-3.5 h-3.5 text-slate-300" />
               )}
-              <span>You ({candidateName || 'Candidate'})</span>
+              <span>You</span>
             </div>
           </div>
 
-          {/* RIGHT: AI AGENT WITH DYNAMIC VOICE VISUALIZER */}
+          {/* RIGHT: AI INTERVIEWER */}
           <div className="relative w-full aspect-video bg-[#1C1F26] rounded-2xl overflow-hidden shadow-2xl flex items-center justify-center border border-slate-800/80">
             <AiVisualizer
               isAiSpeaking={isAiSpeaking}
               audioLevel={aiAudioLevel}
-              subtitles={subtitlesText}
-              interviewerName="Dr. Sarah Vance"
             />
 
             {/* Participant Tag */}
             <div className="absolute bottom-3 left-3 bg-black/60 backdrop-blur-sm px-2.5 py-1 rounded-lg flex items-center gap-1.5 text-xs font-medium text-slate-200 z-20">
               <span className={`w-2 h-2 rounded-full ${isAiSpeaking ? 'bg-cyan-400 animate-pulse' : 'bg-slate-500'}`} />
-              <span>AI Interviewer (Dr. Sarah Vance)</span>
+              <span>AI Interviewer</span>
             </div>
           </div>
 

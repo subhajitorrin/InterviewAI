@@ -57,7 +57,7 @@ async def entrypoint(ctx: JobContext):
     vad_plugin = silero.VAD.load()
 
     instructions = (
-        "You are an encouraging, professional AI Technical Interviewer named Dr. Sarah Vance. "
+        "You are an encouraging, professional AI Technical Interviewer. "
         "Keep your conversational responses direct, warm, concise, and natural (1-2 sentences). "
         "Never repeat yourself. Converse smoothly with the candidate. "
         "When the candidate answers, acknowledge their response concisely and ask the next technical question."
@@ -134,7 +134,7 @@ async def entrypoint(ctx: JobContext):
             
             logger.info("🔊 Generating initial greeting speech...")
             handle = session.say(
-                "Hi there! I'm Dr. Sarah Vance, your AI interviewer. How are you doing today?",
+                "Hi there! I'm your AI Interviewer. How are you doing today?",
                 allow_interruptions=False,
             )
             await handle

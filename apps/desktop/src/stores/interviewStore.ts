@@ -110,7 +110,7 @@ export const useInterviewStore = create<SimpleInterviewState>((set, get) => ({
   messages: [],
 
   startInterview: () => {
-    const greeting = "Hi there! I'm Dr. Sarah Vance, your AI interviewer. How are you doing today?";
+    const greeting = "Hi there! I'm your AI Interviewer. How are you doing today?";
 
     set({
       currentPage: 'call',
