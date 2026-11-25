@@ -109,6 +109,49 @@ ipcMain.handle('log:append', async (_event, { speaker, text }: { speaker: string
   }
 });
 
+ipcMain.handle('opencv:detectPresence', async (_event, imageBase64: string) => {
+  return new Promise((resolve) => {
+    try {
+      const { spawn } = require('child_process');
+      const rootDir = path.resolve(__dirname, '../../');
+      const pythonBin = path.join(rootDir, 'apps/agent/.venv/bin/python');
+      const scriptPath = path.join(rootDir, 'apps/agent/presence_detector.py');
+
+      const proc = spawn(pythonBin, [scriptPath]);
+      let output = '';
+      let errOutput = '';
+
+      proc.stdout.on('data', (d: Buffer) => { output += d.toString(); });
+      proc.stderr.on('data', (d: Buffer) => { errOutput += d.toString(); });
+
+      proc.on('close', (code: number) => {
+        if (code === 0 && output.trim()) {
+          try {
+            resolve(JSON.parse(output.trim()));
+            return;
+          } catch {}
+        }
+        resolve({
+          cameraActive: true,
+          isPresent: false,
+          error: errOutput || `OpenCV exit code ${code}`,
+          method: 'opencv-fallback',
+        });
+      });
+
+      proc.stdin.write(imageBase64 || '');
+      proc.stdin.end();
+    } catch (e: any) {
+      resolve({
+        cameraActive: true,
+        isPresent: false,
+        error: e.message,
+        method: 'opencv-error',
+      });
+    }
+  });
+});
+
 app.whenReady().then(() => {
   createWindow();
 

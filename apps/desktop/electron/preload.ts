@@ -6,6 +6,7 @@ export interface ElectronAPI {
   getLiveKitToken: (roomName: string, participantName?: string, metadata?: string) => Promise<string>;
   initConversationLog: (candidateName: string, role: string) => Promise<boolean>;
   logConversationTurn: (speaker: string, text: string) => Promise<boolean>;
+  detectPresenceWithOpenCV: (imageBase64: string) => Promise<any>;
 }
 
 const api: ElectronAPI = {
@@ -17,6 +18,8 @@ const api: ElectronAPI = {
     ipcRenderer.invoke('log:init', { candidateName, role }),
   logConversationTurn: (speaker: string, text: string) =>
     ipcRenderer.invoke('log:append', { speaker, text }),
+  detectPresenceWithOpenCV: (imageBase64: string) =>
+    ipcRenderer.invoke('opencv:detectPresence', imageBase64),
 };
 
 contextBridge.exposeInMainWorld('electronAPI', api);

@@ -32,14 +32,20 @@ export async function fetchRunningMacApps(): Promise<string[]> {
   return ['Terminal', 'Finder'];
 }
 
-/**
- * Checks candidate presence on camera using Native FaceDetector API or Canvas sampling.
- */
-export async function detectCandidatePresence(video: HTMLVideoElement | null): Promise<{
+export interface PresenceCheckResult {
   cameraActive: boolean;
   isPresent: boolean;
   reason?: string;
-}> {
+  method?: string;
+  faceDetected?: boolean;
+  facesCount?: number;
+}
+
+/**
+ * Checks candidate presence on webcam using OpenCV Haar Cascades.
+ * Falls back to HTML5 Canvas analysis if OpenCV service is unreachable.
+ */
+export async function detectCandidatePresence(video: HTMLVideoElement | null): Promise<PresenceCheckResult> {
   if (!video || !video.srcObject) {
     return {
       cameraActive: false,
@@ -67,23 +73,55 @@ export async function detectCandidatePresence(video: HTMLVideoElement | null): P
     };
   }
 
-  // 1. Try native Chromium / Electron FaceDetector API
-  if (typeof (window as any).FaceDetector !== 'undefined') {
+  // Capture current webcam snapshot from video element
+  let base64Image = '';
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = 320;
+    canvas.height = 240;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (ctx) {
+      ctx.drawImage(video, 0, 0, 320, 240);
+      base64Image = canvas.toDataURL('image/jpeg', 0.85);
+    }
+  } catch (canvasErr) {
+    console.warn('Failed to capture video snapshot for OpenCV:', canvasErr);
+  }
+
+  // 1. Primary: OpenCV Face & Upper Body Detection (via Electron IPC or Vite middleware)
+  if (base64Image) {
     try {
-      const detector = new (window as any).FaceDetector({ fastMode: true, maxDetectedFaces: 1 });
-      const faces = await detector.detect(video);
-      if (faces && faces.length > 0) {
+      let opencvResult: any = null;
+
+      if ((window as any).electronAPI?.detectPresenceWithOpenCV) {
+        opencvResult = await (window as any).electronAPI.detectPresenceWithOpenCV(base64Image);
+      } else {
+        const res = await fetch('/api/opencv/detect-presence', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image: base64Image }),
+        });
+        if (res.ok) {
+          opencvResult = await res.json();
+        }
+      }
+
+      if (opencvResult && typeof opencvResult.isPresent === 'boolean') {
         return {
-          cameraActive: true,
-          isPresent: true
+          cameraActive: opencvResult.cameraActive ?? true,
+          isPresent: opencvResult.isPresent,
+          reason: opencvResult.reason,
+          method: opencvResult.method || 'opencv',
+          faceDetected: opencvResult.faceDetected,
+          facesCount: opencvResult.facesCount,
         };
       }
-    } catch (e) {
-      console.warn('Native FaceDetector error, falling back to canvas analysis:', e);
+    } catch (cvErr) {
+      console.warn('OpenCV detection call failed, using canvas fallback:', cvErr);
     }
   }
 
-  // 2. Fallback: HTML5 Canvas center-region luminance and contrast sampling
+  // 2. Fallback: Native FaceDetector or HTML5 Canvas sampling
   try {
     const canvas = document.createElement('canvas');
     canvas.width = 160;
@@ -91,12 +129,10 @@ export async function detectCandidatePresence(video: HTMLVideoElement | null): P
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     
     if (!ctx) {
-      return { cameraActive: true, isPresent: true };
+      return { cameraActive: true, isPresent: true, method: 'canvas-simple' };
     }
 
     ctx.drawImage(video, 0, 0, 160, 120);
-
-    // Sample center 80x80 box where candidate head/torso sits
     const frame = ctx.getImageData(40, 20, 80, 80);
     const data = frame.data;
     const totalPixels = data.length / 4;
@@ -109,15 +145,8 @@ export async function detectCandidatePresence(video: HTMLVideoElement | null): P
       const b = data[i + 2];
       const lum = 0.299 * r + 0.587 * g + 0.114 * b;
 
-      // Ensure camera is not covered / completely black
-      if (lum > 22) {
-        litPixels++;
-      }
-
-      // Check realistic variance / contrast (person vs plain static surface)
-      if (Math.abs(r - g) > 7 || Math.abs(r - b) > 7) {
-        contrastPixels++;
-      }
+      if (lum > 22) litPixels++;
+      if (Math.abs(r - g) > 7 || Math.abs(r - b) > 7) contrastPixels++;
     }
 
     const isLit = (litPixels / totalPixels) > 0.3;
@@ -127,11 +156,12 @@ export async function detectCandidatePresence(video: HTMLVideoElement | null): P
     return {
       cameraActive: true,
       isPresent,
-      reason: isPresent ? undefined : 'Candidate not visible in camera center'
+      reason: isPresent ? undefined : 'No person detected in camera view',
+      method: 'canvas-fallback'
     };
   } catch (err) {
-    console.warn('Canvas presence detection error:', err);
-    return { cameraActive: true, isPresent: true };
+    console.warn('Canvas presence fallback error:', err);
+    return { cameraActive: true, isPresent: true, method: 'fallback-pass' };
   }
 }
 

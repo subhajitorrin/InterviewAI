@@ -160,6 +160,15 @@ async def entrypoint(ctx: JobContext):
                 append_conversation_log("SYSTEM ALERT", f"Candidate opened application: {app_name}")
                 append_conversation_log("AI (Sarah Mitchell)", warn_text)
                 session.say(warn_text, allow_interruptions=False)
+            elif payload.get("type") == "presence_result":
+                is_present = payload.get("isPresent", True)
+                reason = payload.get("reason", "Face or person not detected on webcam")
+                if not is_present:
+                    warn_presence = "You aren't visible in front of the camera. Please make sure you are in frame."
+                    logger.warning(f"⚠️ OpenCV presence alert: {reason}")
+                    append_conversation_log("SYSTEM ALERT", f"OpenCV camera check: {reason}")
+                    append_conversation_log("AI (Sarah Mitchell)", warn_presence)
+                    session.say(warn_presence, allow_interruptions=False)
         except Exception as e:
             logger.warning(f"Error handling data packet: {e}")
 

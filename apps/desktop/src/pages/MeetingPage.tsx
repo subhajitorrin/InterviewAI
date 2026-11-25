@@ -51,8 +51,9 @@ export const MeetingPage: React.FC = () => {
   const baselineAppsRef = useRef<string[]>([]);
   const warnedAppsRef = useRef<Set<string>>(new Set());
   const hasStartedFlowRef = useRef<boolean>(false);
-
   const livekitConnectedRef = useRef<boolean>(false);
+  const sendDataRef = useRef<(data: any) => Promise<void>>(() => Promise.resolve());
+  const hasWarnedAbsenceRef = useRef<boolean>(false);
 
   // Stable handler for speaking changes
   const handleAiSpeakingChange = useCallback((speaking: boolean) => {
@@ -68,6 +69,23 @@ export const MeetingPage: React.FC = () => {
       if (data.message) {
         setStepMessage(data.message);
       }
+
+      // When AI initiates webcam test step, run OpenCV face presence detection
+      // No warning is shown on the UI; if not detected, the AI speaks the warning directly
+      if (data.step === 'webcam_test') {
+        setTimeout(async () => {
+          try {
+            const presence = await detectCandidatePresence(videoRef.current);
+            if (!presence.isPresent || !presence.cameraActive) {
+              sendDataRef.current({ type: 'presence_result', isPresent: false, reason: presence.reason });
+            } else {
+              sendDataRef.current({ type: 'presence_result', isPresent: true });
+            }
+          } catch (e) {
+            console.warn('OpenCV verification error:', e);
+          }
+        }, 1200);
+      }
     }
   }, []);
 
@@ -79,6 +97,10 @@ export const MeetingPage: React.FC = () => {
     onAiSpeakingChange: handleAiSpeakingChange,
     onDataReceived: handleDataReceived,
   });
+
+  useEffect(() => {
+    sendDataRef.current = sendData;
+  }, [sendData]);
 
   useEffect(() => {
     livekitConnectedRef.current = isConnected;
@@ -244,13 +266,9 @@ export const MeetingPage: React.FC = () => {
 
         const presence = await presencePromise;
         if (useInterviewStore.getState().isVideoMuted || !presence.cameraActive) {
-          setStepMessage('Camera is off. Please enable your webcam.');
           await speakSafe('Please make sure your camera is turned on.');
         } else if (!presence.isPresent) {
-          setStepMessage('Candidate not detected. Please center yourself.');
-          await speakSafe('Please center yourself in front of the camera.');
-        } else {
-          setStepMessage('Webcam & presence verified.');
+          await speakSafe("You aren't visible in front of the camera. Please make sure you are in frame.");
         }
 
         await new Promise((r) => setTimeout(r, 600));
@@ -313,6 +331,37 @@ export const MeetingPage: React.FC = () => {
 
     return () => clearInterval(interval);
   }, [currentStep, activeWarningApp, sendData]);
+
+  // Periodic OpenCV presence monitor during active interview
+  // When candidate is not detected, no banner or warning is shown on the UI.
+  // The AI triggers a verbal warning: "You aren't visible in front of the camera. Please make sure you are in frame."
+  useEffect(() => {
+    if (currentStep !== 'in_progress') return;
+
+    const interval = setInterval(async () => {
+      if (useInterviewStore.getState().isVideoMuted) return;
+      try {
+        const presence = await detectCandidatePresence(videoRef.current);
+        if (!presence.isPresent && presence.cameraActive) {
+          if (!hasWarnedAbsenceRef.current) {
+            hasWarnedAbsenceRef.current = true;
+            if (livekitConnectedRef.current) {
+              sendDataRef.current({ type: 'presence_result', isPresent: false });
+            } else {
+              speakSpeechFallback("You aren't visible in front of the camera. Please make sure you are in frame.");
+            }
+          }
+        } else if (presence.isPresent) {
+          // Reset warning flag when candidate returns to camera frame
+          hasWarnedAbsenceRef.current = false;
+        }
+      } catch (err) {
+        console.warn('Periodic OpenCV check error:', err);
+      }
+    }, 7000);
+
+    return () => clearInterval(interval);
+  }, [currentStep]);
 
   return (
     <div className="h-screen w-screen bg-[#111317] text-white flex flex-col justify-between p-6 select-none overflow-hidden relative">

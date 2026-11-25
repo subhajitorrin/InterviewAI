@@ -156,6 +156,55 @@ export default defineConfig({
             res.end();
           }
         });
+
+        server.middlewares.use('/api/opencv/detect-presence', async (req, res) => {
+          if (req.method === 'POST') {
+            let body = '';
+            req.on('data', (chunk) => { body += chunk; });
+            req.on('end', async () => {
+              try {
+                const { spawn } = await import('child_process');
+                const parsed = JSON.parse(body || '{}');
+                const imageBase64 = parsed.image || '';
+
+                const rootDir = path.resolve(__dirname, '../../');
+                const pythonBin = path.join(rootDir, 'apps/agent/.venv/bin/python');
+                const scriptPath = path.join(rootDir, 'apps/agent/presence_detector.py');
+
+                const proc = spawn(pythonBin, [scriptPath]);
+                let output = '';
+                let errOutput = '';
+
+                proc.stdout.on('data', (d) => { output += d.toString(); });
+                proc.stderr.on('data', (d) => { errOutput += d.toString(); });
+
+                proc.on('close', (code) => {
+                  res.setHeader('Content-Type', 'application/json');
+                  if (code === 0 && output.trim()) {
+                    try {
+                      res.end(output.trim());
+                      return;
+                    } catch {}
+                  }
+                  res.end(JSON.stringify({
+                    cameraActive: true,
+                    isPresent: false,
+                    error: errOutput || `OpenCV exit code ${code}`,
+                    method: 'opencv-fallback'
+                  }));
+                });
+
+                proc.stdin.write(imageBase64);
+                proc.stdin.end();
+              } catch (err: any) {
+                res.statusCode = 500;
+                res.end(JSON.stringify({ error: err.message, cameraActive: true, isPresent: false }));
+              }
+            });
+          } else {
+            res.end();
+          }
+        });
       },
     },
   ],
