@@ -1,0 +1,16 @@
+{
+  "name": "interview-ai",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Autonomous Resume-Aware Real-Time AI Interview Platform with Desktop Context Awareness",
+  "scripts": {
+    "dev": "cd apps/desktop && npm run dev",
+    "build": "cd apps/desktop && npm run build",
+    "electron:dev": "cd apps/desktop && npm run electron:compile && npm run dev",
+    "electron:start": "cd apps/desktop && npm run electron:start"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ]
+}
