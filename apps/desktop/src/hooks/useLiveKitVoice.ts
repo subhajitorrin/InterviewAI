@@ -21,6 +21,7 @@ export function useLiveKitVoice({
   const roomRef = useRef<Room | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [aiAudioLevel, setAiAudioLevel] = useState(0);
 
   // Keep latest callbacks in refs so changes don't invalidate connect() callback
   const callbacksRef = useRef({ onConnected, onDisconnected, onAiSpeakingChange });
@@ -33,7 +34,11 @@ export function useLiveKitVoice({
   const isConnectingRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  // Track and clean up all attached audio elements to prevent audio leaks/repeating echoes
+  // Web Audio Analyser references
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
+
+  // Clean up all attached audio elements to prevent audio leaks/repeating echoes
   const cleanupAudioElements = useCallback(() => {
     const existingAudio = document.querySelectorAll('.livekit-remote-audio-track');
     existingAudio.forEach((el) => {
@@ -42,6 +47,18 @@ export function useLiveKitVoice({
         el.remove();
       } catch {}
     });
+
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
+    }
+    if (audioContextRef.current) {
+      try {
+        audioContextRef.current.close();
+      } catch {}
+      audioContextRef.current = null;
+    }
+    setAiAudioLevel(0);
   }, []);
 
   const disconnect = useCallback(async () => {
@@ -137,9 +154,66 @@ export function useLiveKitVoice({
         if (track.kind === Track.Kind.Audio) {
           const el = track.attach();
           el.className = 'livekit-remote-audio-track';
+          el.volume = 1.0;
+          el.muted = false;
           document.body.appendChild(el);
-          el.play().catch((e) => console.warn('[LiveKit] Remote audio play error:', e));
+
+          // Play audio and handle browser autoplay policy
+          el.play().catch((e) => {
+            console.warn('[LiveKit] Remote audio play error:', e);
+            const resumeAudio = () => {
+              el.play().catch(() => {});
+              room.startAudio().catch(() => {});
+              window.removeEventListener('click', resumeAudio);
+            };
+            window.addEventListener('click', resumeAudio, { once: true });
+          });
+
           console.log(`[LiveKit] Attached and playing AI voice track from: ${participant.identity}`);
+
+          // Set up Web Audio Analyser for live frequency visualization
+          try {
+            const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+            if (AudioCtx && track.mediaStreamTrack) {
+              if (audioContextRef.current) {
+                audioContextRef.current.close().catch(() => {});
+              }
+
+              const audioCtx = new AudioCtx();
+              audioContextRef.current = audioCtx;
+
+              const source = audioCtx.createMediaStreamSource(new MediaStream([track.mediaStreamTrack]));
+              const analyser = audioCtx.createAnalyser();
+              analyser.fftSize = 64;
+              analyser.smoothingTimeConstant = 0.75;
+              source.connect(analyser);
+
+              const bufferLength = analyser.frequencyBinCount;
+              const dataArray = new Uint8Array(bufferLength);
+
+              const checkAudioLevel = () => {
+                if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
+                  return;
+                }
+
+                analyser.getByteFrequencyData(dataArray);
+                let sum = 0;
+                for (let i = 0; i < bufferLength; i++) {
+                  sum += dataArray[i];
+                }
+                const average = sum / bufferLength;
+                // Normalize 0..1 (boost sensitivity for voice frequencies)
+                const normalized = Math.min(1, Math.pow(average / 90, 1.2));
+                setAiAudioLevel(normalized);
+
+                animationFrameRef.current = requestAnimationFrame(checkAudioLevel);
+              };
+
+              checkAudioLevel();
+            }
+          } catch (analyserErr) {
+            console.warn('[LiveKit] Web Audio Analyser setup error:', analyserErr);
+          }
         }
       };
 
@@ -162,6 +236,9 @@ export function useLiveKitVoice({
           (s) => !s.isLocal && !s.identity.toLowerCase().startsWith('candidate')
         );
         callbacksRef.current.onAiSpeakingChange?.(isAiSpeaking);
+        if (!isAiSpeaking) {
+          setAiAudioLevel(0);
+        }
       });
 
       room.on(RoomEvent.Disconnected, () => {
@@ -176,6 +253,13 @@ export function useLiveKitVoice({
       if (abortController.signal.aborted) {
         await room.disconnect();
         return;
+      }
+
+      // Unlock browser audio context automatically
+      try {
+        await room.startAudio();
+      } catch (startAudioErr) {
+        console.warn('[LiveKit] startAudio error:', startAudioErr);
       }
 
       roomRef.current = room;
@@ -216,6 +300,7 @@ export function useLiveKitVoice({
     connect,
     disconnect,
     isConnected,
+    aiAudioLevel,
     error,
   };
 }

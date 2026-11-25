@@ -110,18 +110,23 @@ export const useInterviewStore = create<SimpleInterviewState>((set, get) => ({
   messages: [],
 
   startInterview: () => {
-    const { selectedRole } = get();
-    const questions = MOCK_QUESTIONS[selectedRole] || MOCK_QUESTIONS.default;
-    const firstQ = questions[0];
+    const greeting = "Hi there! I'm Dr. Sarah Vance, your AI interviewer. How are you doing today?";
 
     set({
       currentPage: 'call',
       callSeconds: 0,
       questionIndex: 0,
-      currentQuestion: firstQ,
-      subtitlesText: firstQ,
+      currentQuestion: greeting,
+      subtitlesText: greeting,
       isAiSpeaking: false,
-      messages: []
+      messages: [
+        {
+          id: `ai-${Date.now()}`,
+          sender: 'ai',
+          text: greeting,
+          time: '00:00'
+        }
+      ]
     });
   },
 

@@ -1,13 +1,13 @@
 import React, { useEffect, useRef, useCallback } from 'react';
 import { useInterviewStore } from '../stores/interviewStore';
 import { useLiveKitVoice } from '../hooks/useLiveKitVoice';
+import { AiVisualizer } from '../components/AiVisualizer';
 import { 
   Mic, 
   MicOff, 
   Video, 
   VideoOff, 
-  PhoneOff, 
-  Bot 
+  PhoneOff 
 } from 'lucide-react';
 
 export const MeetingPage: React.FC = () => {
@@ -16,6 +16,7 @@ export const MeetingPage: React.FC = () => {
     isVideoMuted,
     isAiSpeaking,
     candidateName,
+    subtitlesText,
     toggleMic,
     toggleVideo,
     endInterview
@@ -30,7 +31,7 @@ export const MeetingPage: React.FC = () => {
   }, []);
 
   // Connect to LiveKit audio room for real-time AI voice conversation
-  const { connect, disconnect } = useLiveKitVoice({
+  const { connect, disconnect, aiAudioLevel } = useLiveKitVoice({
     roomName: 'interview-room-1',
     participantName: candidateName || 'Candidate',
     isMicMuted,
@@ -128,7 +129,7 @@ export const MeetingPage: React.FC = () => {
             )}
 
             {/* Participant Tag */}
-            <div className="absolute bottom-3 left-3 bg-black/60 backdrop-blur-sm px-2.5 py-1 rounded-lg flex items-center gap-1.5 text-xs font-medium text-slate-200">
+            <div className="absolute bottom-3 left-3 bg-black/60 backdrop-blur-sm px-2.5 py-1 rounded-lg flex items-center gap-1.5 text-xs font-medium text-slate-200 z-20">
               {isMicMuted ? (
                 <MicOff className="w-3.5 h-3.5 text-rose-400" />
               ) : (
@@ -138,22 +139,18 @@ export const MeetingPage: React.FC = () => {
             </div>
           </div>
 
-          {/* RIGHT: AI AGENT */}
+          {/* RIGHT: AI AGENT WITH DYNAMIC VOICE VISUALIZER */}
           <div className="relative w-full aspect-video bg-[#1C1F26] rounded-2xl overflow-hidden shadow-2xl flex items-center justify-center border border-slate-800/80">
-            <div className="flex flex-col items-center justify-center">
-              {/* AI Avatar with subtle speech ring */}
-              <div className={`relative w-24 h-24 rounded-full flex items-center justify-center transition-all duration-300 ${
-                isAiSpeaking ? 'ring-4 ring-blue-500/60 scale-105' : 'ring-1 ring-white/10'
-              }`}>
-                <div className="w-20 h-20 rounded-full bg-gradient-to-tr from-blue-700 to-indigo-600 flex items-center justify-center shadow-lg">
-                  <Bot className="w-10 h-10 text-white" />
-                </div>
-              </div>
-            </div>
+            <AiVisualizer
+              isAiSpeaking={isAiSpeaking}
+              audioLevel={aiAudioLevel}
+              subtitles={subtitlesText}
+              interviewerName="Dr. Sarah Vance"
+            />
 
             {/* Participant Tag */}
-            <div className="absolute bottom-3 left-3 bg-black/60 backdrop-blur-sm px-2.5 py-1 rounded-lg flex items-center gap-1.5 text-xs font-medium text-slate-200">
-              <span className={`w-2 h-2 rounded-full ${isAiSpeaking ? 'bg-blue-400 animate-pulse' : 'bg-slate-500'}`} />
+            <div className="absolute bottom-3 left-3 bg-black/60 backdrop-blur-sm px-2.5 py-1 rounded-lg flex items-center gap-1.5 text-xs font-medium text-slate-200 z-20">
+              <span className={`w-2 h-2 rounded-full ${isAiSpeaking ? 'bg-cyan-400 animate-pulse' : 'bg-slate-500'}`} />
               <span>AI Interviewer (Dr. Sarah Vance)</span>
             </div>
           </div>

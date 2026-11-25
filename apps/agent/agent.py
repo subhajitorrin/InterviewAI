@@ -107,18 +107,36 @@ async def entrypoint(ctx: JobContext):
         if hasattr(session, "_room_io") and session._room_io:
             session._room_io.set_participant(participant.identity)
 
-    # Wait for the candidate participant to join the room before speaking greeting
+    # Wait for candidate and media pipeline to be completely ready before speaking greeting
     async def initial_greeting():
         try:
             logger.info("⏳ Waiting for candidate participant to join room...")
-            participant = await ctx.wait_for_participant()
-            logger.info(f"👤 Candidate joined: {participant.identity}. Preparing initial greeting...")
+            await ctx.wait_for_participant()
+            logger.info("👤 Candidate participant detected.")
             
-            # Allow audio track publication and WebRTC connection to stabilize
-            await asyncio.sleep(1.0)
+            # Wait for RoomIO to complete audio setup and publish the audio track
+            if hasattr(session, "_room_io") and session._room_io:
+                logger.info("⏳ Waiting for RoomIO audio output to be ready...")
+                await session._room_io.wait_for_ready()
+                
+                # Wait for remote candidate to subscribe to the agent's audio track
+                sub_fut = session._room_io.subscribed_fut
+                if sub_fut:
+                    try:
+                        logger.info("⏳ Waiting for candidate to subscribe to AI voice track...")
+                        await asyncio.wait_for(asyncio.shield(sub_fut), timeout=6.0)
+                        logger.info("✅ Candidate subscribed to AI voice track!")
+                    except asyncio.TimeoutError:
+                        logger.warning("Subscription wait timed out; continuing to speech")
+
+            # Small 0.5s pause to ensure browser audio element is unmuted and attached
+            await asyncio.sleep(0.5)
             
             logger.info("🔊 Generating initial greeting speech...")
-            handle = session.say("Hi there! I'm Dr. Sarah Vance, your AI interviewer. How are you doing today?")
+            handle = session.say(
+                "Hi there! I'm Dr. Sarah Vance, your AI interviewer. How are you doing today?",
+                allow_interruptions=False,
+            )
             await handle
             logger.info("🔊 Greeting speech playback completed.")
         except asyncio.CancelledError:
