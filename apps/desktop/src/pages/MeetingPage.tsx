@@ -1,13 +1,23 @@
-import React, { useEffect, useRef, useCallback } from 'react';
-import { useInterviewStore } from '../stores/interviewStore';
+import React, { useEffect, useRef, useCallback, useState } from 'react';
+import { useInterviewStore, speakSpeechFallback } from '../stores/interviewStore';
 import { useLiveKitVoice } from '../hooks/useLiveKitVoice';
 import { AiVisualizer } from '../components/AiVisualizer';
+import { 
+  fetchRunningMacApps, 
+  detectCandidatePresence, 
+  findNewlyOpenedApps 
+} from '../utils/systemMonitorClient';
 import { 
   Mic, 
   MicOff, 
   Video, 
   VideoOff, 
-  PhoneOff 
+  PhoneOff,
+  AlertTriangle,
+  CheckCircle2,
+  Sparkles,
+  Laptop,
+  Camera
 } from 'lucide-react';
 
 export const MeetingPage: React.FC = () => {
@@ -27,13 +37,24 @@ export const MeetingPage: React.FC = () => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
+  // Exact 4-step flow state: greeting -> desktop_check -> webcam_test -> ready -> in_progress
+  const [currentStep, setCurrentStep] = useState<
+    'greeting' | 'desktop_check' | 'webcam_test' | 'ready' | 'in_progress'
+  >('greeting');
+  const [stepMessage, setStepMessage] = useState<string>('Initializing interview chamber...');
+  const [activeWarningApp, setActiveWarningApp] = useState<string | null>(null);
+
+  const baselineAppsRef = useRef<string[]>([]);
+  const warnedAppsRef = useRef<Set<string>>(new Set());
+  const hasStartedFlowRef = useRef<boolean>(false);
+
   // Stable handler for speaking changes
   const handleAiSpeakingChange = useCallback((speaking: boolean) => {
     useInterviewStore.getState().setAiSpeaking(speaking);
   }, []);
 
   // Connect to LiveKit audio room for real-time AI voice conversation
-  const { connect, disconnect, aiAudioLevel } = useLiveKitVoice({
+  const { connect, disconnect, isConnected, aiAudioLevel } = useLiveKitVoice({
     roomName: 'interview-room-1',
     participantName: candidateName || 'Candidate',
     metadata: JSON.stringify({
@@ -55,6 +76,7 @@ export const MeetingPage: React.FC = () => {
     };
   }, [connect, disconnect]);
 
+  // Webcam stream management
   useEffect(() => {
     let isCancelled = false;
 
@@ -110,9 +132,164 @@ export const MeetingPage: React.FC = () => {
     };
   }, [isVideoMuted]);
 
+  // Safe female voice speech dispatcher (only uses browser fallback if LiveKit is not handling audio)
+  const speakSafe = useCallback((text: string): Promise<void> => {
+    return new Promise((resolve) => {
+      if (!isConnected) {
+        useInterviewStore.getState().setAiSpeaking(true);
+        speakSpeechFallback(
+          text,
+          () => useInterviewStore.getState().setAiSpeaking(true),
+          () => {
+            useInterviewStore.getState().setAiSpeaking(false);
+            resolve();
+          }
+        );
+      } else {
+        // If LiveKit is connected, wait estimated duration of the spoken phrase
+        const words = text.split(' ').length;
+        const durationMs = Math.max(2200, (words / 2.8) * 1000);
+        setTimeout(resolve, durationMs);
+      }
+    });
+  }, [isConnected]);
+
+  // 1. Exact 4-Step Onboarding Flow:
+  // Step 1: Greetings with my name
+  // Step 2: Desktop environment check (list active apps and advise closing unrelated ones)
+  // Step 3: Webcam test
+  // Step 4: All good -> start interview
+  useEffect(() => {
+    if (hasStartedFlowRef.current) return;
+    hasStartedFlowRef.current = true;
+
+    let cancelled = false;
+
+    const runFlow = async () => {
+      await new Promise((r) => setTimeout(r, 800));
+      if (cancelled) return;
+
+      const nameToGreet = candidateName && candidateName.toLowerCase() !== 'candidate' 
+        ? candidateName 
+        : 'there';
+
+      // --- STEP 1: GREETINGS WITH MY NAME ---
+      setCurrentStep('greeting');
+      const greetingText = `Hi ${nameToGreet}! Welcome to your ${selectedRole} interview.`;
+      setStepMessage(greetingText);
+      await speakSafe(greetingText);
+      if (cancelled) return;
+
+      await new Promise((r) => setTimeout(r, 600));
+      if (cancelled) return;
+
+      // --- STEP 2: DESKTOP ENVIRONMENT CHECK ---
+      setCurrentStep('desktop_check');
+      const latestApps = await fetchRunningMacApps();
+      baselineAppsRef.current = latestApps;
+
+      const activeApps = latestApps.filter(
+        (a) => !['loginwindow', 'WindowManager', 'Dock'].includes(a)
+      );
+      const appListText = activeApps.slice(0, 4).join(', ');
+
+      const desktopText = `Let me check your desktop environment. I can see ${appListText || 'several applications'} are active. You can close any applications that are not relevant to our interview.`;
+      setStepMessage(`Desktop: ${appListText || 'Active applications verified'}`);
+      await speakSafe(desktopText);
+      if (cancelled) return;
+
+      await new Promise((r) => setTimeout(r, 600));
+      if (cancelled) return;
+
+      // --- STEP 3: WEBCAM TEST ---
+      setCurrentStep('webcam_test');
+      setStepMessage('Testing webcam & candidate presence...');
+      const webcamSpeech = `Now let me test your webcam.`;
+
+      const presencePromise = detectCandidatePresence(videoRef.current);
+      await Promise.all([speakSafe(webcamSpeech), presencePromise]);
+      if (cancelled) return;
+
+      const presence = await presencePromise;
+      if (isVideoMuted || !presence.cameraActive) {
+        setStepMessage('Camera is off. Please enable your webcam.');
+        await speakSafe('Please make sure your camera is turned on.');
+      } else if (!presence.isPresent) {
+        setStepMessage('Candidate not detected. Please center yourself.');
+        await speakSafe('Please center yourself in front of the camera.');
+      } else {
+        setStepMessage('Webcam & presence verified.');
+      }
+
+      await new Promise((r) => setTimeout(r, 700));
+      if (cancelled) return;
+
+      // --- STEP 4: ALL GOOD, LET'S START ---
+      setCurrentStep('ready');
+      const startSpeech = `All good! Let's start with the interview.`;
+      setStepMessage("All good! Let's start with the interview.");
+      await speakSafe(startSpeech);
+      if (cancelled) return;
+
+      await new Promise((r) => setTimeout(r, 400));
+      if (cancelled) return;
+
+      setCurrentStep('in_progress');
+      setStepMessage('Interview in progress');
+    };
+
+    runFlow();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [candidateName, selectedRole, isVideoMuted, speakSafe]);
+
+  // 2. Real-Time Application Monitor during the Interview
+  useEffect(() => {
+    // Only monitor after baseline applications are established
+    if (currentStep !== 'in_progress' && currentStep !== 'ready') return;
+
+    const interval = setInterval(async () => {
+      try {
+        const latestApps = await fetchRunningMacApps();
+        const newlyOpened = findNewlyOpenedApps(latestApps, baselineAppsRef.current);
+
+        const unannounced = newlyOpened.filter((app) => !warnedAppsRef.current.has(app.toLowerCase()));
+
+        if (unannounced.length > 0) {
+          const appName = unannounced[0];
+          warnedAppsRef.current.add(appName.toLowerCase());
+          setActiveWarningApp(appName);
+
+          // Vocal warning in female voice
+          speakSpeechFallback(`Warning: you have opened ${appName}. Please close external applications and return to the interview.`);
+        } else if (activeWarningApp) {
+          // Check if warned app was closed
+          const stillOpen = latestApps.some((a) => a.toLowerCase().trim() === activeWarningApp.toLowerCase().trim());
+          if (!stillOpen) {
+            setActiveWarningApp(null);
+          }
+        }
+      } catch (err) {
+        console.warn('Background app monitor error:', err);
+      }
+    }, 2500);
+
+    return () => clearInterval(interval);
+  }, [currentStep, activeWarningApp]);
+
   return (
-    <div className="h-screen w-screen bg-[#111317] text-white flex flex-col justify-between p-6 select-none overflow-hidden">
+    <div className="h-screen w-screen bg-[#111317] text-white flex flex-col justify-between p-6 select-none overflow-hidden relative">
       
+      {/* Real-Time Floating Warning Banner if an external application is opened */}
+      {activeWarningApp && (
+        <div className="absolute top-5 left-1/2 -translate-x-1/2 z-50 bg-rose-600/95 text-white px-5 py-2.5 rounded-2xl shadow-2xl border border-rose-400 flex items-center gap-2.5 text-xs font-semibold backdrop-blur-md animate-bounce">
+          <AlertTriangle className="w-4 h-4 shrink-0 text-white" />
+          <span>Warning: You have opened <strong>{activeWarningApp}</strong>. Please keep external applications closed.</span>
+        </div>
+      )}
+
       {/* 2 Horizontal Video Boxes */}
       <div className="flex-1 w-full max-w-7xl mx-auto flex items-center justify-center px-4">
         <div className="w-full grid grid-cols-1 md:grid-cols-2 gap-5 items-center">
@@ -137,6 +314,40 @@ export const MeetingPage: React.FC = () => {
               </div>
             )}
 
+            {/* Subtle Step Status Pill */}
+            <div className="absolute top-3 left-3 bg-black/70 backdrop-blur-md px-3 py-1.5 rounded-xl border border-white/10 flex items-center gap-2 text-[11px] font-medium z-20">
+              {currentStep === 'greeting' && (
+                <>
+                  <Sparkles className="w-3.5 h-3.5 text-blue-400" />
+                  <span className="text-slate-300">Welcome & Greeting</span>
+                </>
+              )}
+              {currentStep === 'desktop_check' && (
+                <>
+                  <Laptop className="w-3.5 h-3.5 text-indigo-400" />
+                  <span className="text-indigo-300 truncate max-w-[240px]">{stepMessage}</span>
+                </>
+              )}
+              {currentStep === 'webcam_test' && (
+                <>
+                  <Camera className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
+                  <span className="text-amber-300">{stepMessage}</span>
+                </>
+              )}
+              {currentStep === 'ready' && (
+                <>
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                  <span className="text-emerald-300 font-semibold">{stepMessage}</span>
+                </>
+              )}
+              {currentStep === 'in_progress' && (
+                <>
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                  <span className="text-slate-300">Interview In Progress</span>
+                </>
+              )}
+            </div>
+
             {/* Participant Tag */}
             <div className="absolute bottom-3 left-3 bg-black/60 backdrop-blur-sm px-2.5 py-1 rounded-lg flex items-center gap-1.5 text-xs font-medium text-slate-200 z-20">
               {isMicMuted ? (
@@ -158,7 +369,7 @@ export const MeetingPage: React.FC = () => {
             {/* Participant Tag */}
             <div className="absolute bottom-3 left-3 bg-black/60 backdrop-blur-sm px-2.5 py-1 rounded-lg flex items-center gap-1.5 text-xs font-medium text-slate-200 z-20">
               <span className={`w-2 h-2 rounded-full ${isAiSpeaking ? 'bg-cyan-400 animate-pulse' : 'bg-slate-500'}`} />
-              <span>AI Interviewer</span>
+              <span>AI Interviewer (Sarah)</span>
             </div>
           </div>
 
@@ -170,7 +381,7 @@ export const MeetingPage: React.FC = () => {
         {/* Mute / Unmute */}
         <button
           onClick={toggleMic}
-          className={`w-12 h-12 rounded-full flex items-center justify-center transition-all ${
+          className={`w-12 h-12 rounded-full flex items-center justify-center transition-all cursor-pointer ${
             isMicMuted
               ? 'bg-rose-600 hover:bg-rose-500 text-white shadow-lg shadow-rose-600/30'
               : 'bg-[#2B303C] hover:bg-slate-700 text-white'
@@ -183,7 +394,7 @@ export const MeetingPage: React.FC = () => {
         {/* Video On / Off */}
         <button
           onClick={toggleVideo}
-          className={`w-12 h-12 rounded-full flex items-center justify-center transition-all ${
+          className={`w-12 h-12 rounded-full flex items-center justify-center transition-all cursor-pointer ${
             isVideoMuted
               ? 'bg-rose-600 hover:bg-rose-500 text-white shadow-lg shadow-rose-600/30'
               : 'bg-[#2B303C] hover:bg-slate-700 text-white'
@@ -196,7 +407,7 @@ export const MeetingPage: React.FC = () => {
         {/* End Call Button */}
         <button
           onClick={endInterview}
-          className="h-12 px-6 rounded-full bg-rose-600 hover:bg-rose-500 text-white font-semibold text-xs transition-all flex items-center gap-2 shadow-lg shadow-rose-600/30"
+          className="h-12 px-6 rounded-full bg-rose-600 hover:bg-rose-500 text-white font-semibold text-xs transition-all flex items-center gap-2 shadow-lg shadow-rose-600/30 cursor-pointer"
           title="End Session"
         >
           <PhoneOff className="w-4 h-4" />

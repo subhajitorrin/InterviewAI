@@ -25,36 +25,93 @@ export const ROLES_LIST = [
   'System Design Architect'
 ];
 
-export function speakSpeechFallback(text: string, onStart?: () => void, onEnd?: () => void) {
-  if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-    try {
-      window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.rate = 1.0;
-      utterance.pitch = 1.0;
+let cachedFemaleVoice: SpeechSynthesisVoice | null = null;
 
-      const voices = window.speechSynthesis.getVoices();
-      const preferred = voices.find(v => 
-        v.lang.startsWith('en') && 
-        (v.name.includes('Samantha') || v.name.includes('Google') || v.name.includes('Natural') || v.name.includes('Female') || v.name.includes('Victoria'))
-      );
-      if (preferred) utterance.voice = preferred;
+function getGuaranteedFemaleVoice(): SpeechSynthesisVoice | null {
+  if (typeof window === 'undefined' || !('speechSynthesis' in window)) return null;
+  if (cachedFemaleVoice) return cachedFemaleVoice;
 
-      utterance.onstart = () => {
-        onStart?.();
-      };
-      utterance.onend = () => {
-        onEnd?.();
-      };
-      utterance.onerror = () => {
-        onEnd?.();
-      };
+  const voices = window.speechSynthesis.getVoices();
+  if (!voices || voices.length === 0) return null;
 
-      window.speechSynthesis.speak(utterance);
-    } catch (e) {
-      console.warn('Speech synthesis error:', e);
-      onEnd?.();
+  // Known macOS and standard browser female voice names
+  const femaleNames = [
+    'Samantha', // macOS standard US Female
+    'Victoria', // macOS US Female
+    'Karen',    // macOS AU Female
+    'Tessa',    // macOS ZA Female
+    'Moira',    // macOS IE Female
+    'Fiona',    // macOS Scottish Female
+    'Google US English', // Chrome Female
+    'Microsoft Zira',
+    'Jenny',
+    'Aria'
+  ];
+
+  for (const name of femaleNames) {
+    const found = voices.find(v => v.name.toLowerCase().includes(name.toLowerCase()));
+    if (found) {
+      cachedFemaleVoice = found;
+      return found;
     }
+  }
+
+  // Any English voice with female in name
+  const anyFemale = voices.find(v => v.lang.startsWith('en') && /female/i.test(v.name));
+  if (anyFemale) {
+    cachedFemaleVoice = anyFemale;
+    return anyFemale;
+  }
+
+  // Filter out any known male names on macOS/Windows/Linux:
+  const maleNames = ['alex', 'fred', 'daniel', 'bruce', 'junior', 'ralph', 'albert', 'oliver', 'george', 'tom', 'guy', 'david', 'mark'];
+  const nonMale = voices.find(v => v.lang.startsWith('en') && !maleNames.some(m => v.name.toLowerCase().includes(m)));
+  if (nonMale) {
+    cachedFemaleVoice = nonMale;
+    return nonMale;
+  }
+
+  return voices[0] || null;
+}
+
+if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+  window.speechSynthesis.onvoiceschanged = () => {
+    cachedFemaleVoice = null;
+    getGuaranteedFemaleVoice();
+  };
+}
+
+export function speakSpeechFallback(text: string, onStart?: () => void, onEnd?: () => void) {
+  if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+    onEnd?.();
+    return;
+  }
+
+  try {
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.rate = 1.0;
+    utterance.pitch = 1.05; // slightly higher pitch to guarantee clear female resonance
+
+    const voice = getGuaranteedFemaleVoice();
+    if (voice) {
+      utterance.voice = voice;
+    }
+
+    utterance.onstart = () => {
+      onStart?.();
+    };
+    utterance.onend = () => {
+      onEnd?.();
+    };
+    utterance.onerror = () => {
+      onEnd?.();
+    };
+
+    window.speechSynthesis.speak(utterance);
+  } catch (e) {
+    console.warn('Speech synthesis error:', e);
+    onEnd?.();
   }
 }
 
@@ -244,7 +301,7 @@ export const useInterviewStore = create<SimpleInterviewState>((set, get) => ({
       currentPhaseIndex: 0,
       currentQuestion: greeting,
       subtitlesText: greeting,
-      isAiSpeaking: true,
+      isAiSpeaking: false,
       messages: [
         {
           id: `ai-${Date.now()}`,
@@ -254,13 +311,6 @@ export const useInterviewStore = create<SimpleInterviewState>((set, get) => ({
         }
       ]
     });
-
-    // Provide browser speech synthesis fallback in case LiveKit agent is not speaking
-    speakSpeechFallback(
-      greeting,
-      () => set({ isAiSpeaking: true }),
-      () => set({ isAiSpeaking: false })
-    );
   },
 
   endInterview: () => {

@@ -47,6 +47,39 @@ export default defineConfig({
             res.end(JSON.stringify({ error: err.message }));
           }
         });
+
+        server.middlewares.use('/api/system/apps', async (_req, res) => {
+          try {
+            const { exec } = await import('child_process');
+            const { promisify } = await import('util');
+            const execAsync = promisify(exec);
+            const { stdout } = await execAsync('lsappinfo visibleProcessList');
+            const regex = /"([^"]+)"/g;
+            const names: string[] = [];
+            let match: RegExpExecArray | null;
+
+            while ((match = regex.exec(stdout)) !== null) {
+              const cleanName = match[1]
+                .replace(/_/g, ' ')
+                .replace(/^\u200e/, '')
+                .trim();
+
+              if (
+                cleanName &&
+                cleanName !== 'loginwindow' &&
+                cleanName !== 'WindowManager' &&
+                cleanName !== 'Dock'
+              ) {
+                names.push(cleanName);
+              }
+            }
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ apps: names }));
+          } catch {
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ apps: [] }));
+          }
+        });
       },
     },
   ],

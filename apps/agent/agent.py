@@ -36,11 +36,11 @@ local_piper_tts = PiperTTS(
 )
 
 if use_openai_tts:
-    logger.info("Using OpenAI Neural TTS ('alloy') with local Piper fallback")
-    openai_tts = openai.TTS(model="tts-1", voice="alloy")
+    logger.info("Using OpenAI Neural TTS ('nova' - female) with local Piper fallback")
+    openai_tts = openai.TTS(model="tts-1", voice="nova")
     tts_engine = tts.FallbackAdapter([openai_tts, local_piper_tts])
 else:
-    logger.info("Using Local Piper Neural TTS ('en_US-lessac')")
+    logger.info("Using Local Piper Neural TTS ('en_US-lessac' - female)")
     tts_engine = local_piper_tts
 
 server = AgentServer()
@@ -169,24 +169,37 @@ async def entrypoint(ctx: JobContext):
             # Small 0.5s pause to ensure browser audio element is unmuted and attached
             await asyncio.sleep(0.5)
             
-            logger.info(f"🔊 Generating personalized greeting speech for {candidate_name}...")
-            has_resume = bool(candidate_name and candidate_name.lower() != "candidate")
-            if has_resume:
-                personalized_greeting = (
-                    f"Hi {candidate_name}! Welcome to your {role} interview. "
-                    f"I've reviewed your resume and prepared our plan. How are you doing today?"
-                )
-            else:
-                personalized_greeting = (
-                    f"Hi there! Welcome to your {role} interview. "
-                    f"I've prepared our interview plan. How are you doing today?"
-                )
-            handle = session.say(
-                personalized_greeting,
-                allow_interruptions=False,
-            )
-            await handle
-            logger.info("🔊 Greeting speech playback completed.")
+            logger.info(f"🔊 Starting 4-step verification & greeting sequence for {candidate_name}...")
+            has_name = bool(candidate_name and candidate_name.lower() != "candidate")
+            display_name = candidate_name if has_name else "there"
+
+            # Step 1: Greetings with name
+            logger.info("🔊 Step 1: Greeting with name")
+            step1 = f"Hi {display_name}! Welcome to your {role} interview."
+            handle1 = session.say(step1, allow_interruptions=False)
+            await handle1
+            await asyncio.sleep(0.8)
+
+            # Step 2: Desktop environment check
+            logger.info("🔊 Step 2: Desktop environment check")
+            step2 = "Let me check your desktop environment. I can see several applications are active; you can close any applications that are not relevant to our interview."
+            handle2 = session.say(step2, allow_interruptions=False)
+            await handle2
+            await asyncio.sleep(0.8)
+
+            # Step 3: Webcam test
+            logger.info("🔊 Step 3: Webcam test")
+            step3 = "Now let me test your webcam."
+            handle3 = session.say(step3, allow_interruptions=False)
+            await handle3
+            await asyncio.sleep(1.2)
+
+            # Step 4: All good confirmation & technical kick-off question
+            logger.info("🔊 Step 4: All good & kickoff")
+            step4 = f"All good! Let's start with the interview. To kick things off, tell me about your experience with {skills_str} and walk me through your key project, {top_project}."
+            handle4 = session.say(step4, allow_interruptions=False)
+            await handle4
+            logger.info("🔊 4-step onboarding sequence playback completed.")
         except asyncio.CancelledError:
             pass
         except Exception as e:
