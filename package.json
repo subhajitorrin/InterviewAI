@@ -7,7 +7,9 @@
     "dev": "cd apps/desktop && npm run dev",
     "build": "cd apps/desktop && npm run build",
     "electron:dev": "cd apps/desktop && npm run electron:compile && npm run dev",
-    "electron:start": "cd apps/desktop && npm run electron:start"
+    "electron:start": "cd apps/desktop && npm run electron:start",
+    "livekit:dev": "livekit-server --dev",
+    "agent:start": "cd apps/agent && .venv/bin/python agent.py dev"
   },
   "workspaces": [
     "apps/*",

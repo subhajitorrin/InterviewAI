@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { useInterviewStore } from '../stores/interviewStore';
+import { useLiveKitVoice } from '../hooks/useLiveKitVoice';
 import { 
   Mic, 
   MicOff, 
@@ -21,6 +22,20 @@ export const MeetingPage: React.FC = () => {
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+
+  // Connect to LiveKit audio room for real-time Piper TTS & Deepgram STT
+  const { connect, disconnect } = useLiveKitVoice({
+    roomName: 'interview-room-1',
+    participantName: 'Candidate',
+    isMicMuted,
+  });
+
+  useEffect(() => {
+    connect();
+    return () => {
+      disconnect();
+    };
+  }, [connect, disconnect]);
 
   useEffect(() => {
     let isCancelled = false;

@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'path';
 import { getRunningMacApps } from './system-monitor';
+import { createParticipantToken } from './livekit-token';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -44,6 +45,10 @@ function createWindow() {
 }
 
 // IPC Handlers
+ipcMain.handle('livekit:getToken', async (_event, { roomName, participantName }: { roomName: string; participantName?: string }) => {
+  return await createParticipantToken(roomName, participantName);
+});
+
 ipcMain.handle('system:getRunningApps', async () => {
   return await getRunningMacApps();
 });
