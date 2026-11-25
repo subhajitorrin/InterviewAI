@@ -200,6 +200,7 @@ async def entrypoint(ctx: JobContext):
             role = "Software Engineer"
             skills_str = "modern full-stack development and distributed systems"
             top_project = "production systems"
+            experience_str = ""
             active_apps: list[str] = []
 
             if candidate.metadata:
@@ -212,11 +213,19 @@ async def entrypoint(ctx: JobContext):
                     if meta.get("skills"):
                         skills_list = meta["skills"]
                         if isinstance(skills_list, list) and skills_list:
-                            skills_str = ", ".join(skills_list[:4])
+                            skills_str = ", ".join(skills_list[:8])
                     if meta.get("projects"):
                         proj_list = meta["projects"]
-                        if isinstance(proj_list, list) and proj_list and isinstance(proj_list[0], dict):
-                            top_project = proj_list[0].get("title", top_project)
+                        if isinstance(proj_list, list) and proj_list:
+                            proj_titles = [p.get("title", "") for p in proj_list if isinstance(p, dict) and p.get("title")][:3]
+                            if proj_titles:
+                                top_project = " and ".join(proj_titles)
+                    if meta.get("experience"):
+                        exp_list = meta["experience"]
+                        if isinstance(exp_list, list) and exp_list:
+                            exp_items = [f"{e.get('role')} at {e.get('company')}" for e in exp_list if isinstance(e, dict) and e.get('role') and e.get('company')][:2]
+                            if exp_items:
+                                experience_str = "; ".join(exp_items)
                     if meta.get("activeApps") and isinstance(meta["activeApps"], list):
                         active_apps = [a for a in meta["activeApps"] if a not in ("loginwindow", "WindowManager", "Dock")]
                 except Exception as meta_err:
@@ -226,11 +235,12 @@ async def entrypoint(ctx: JobContext):
             candidate_info["role"] = role
             init_conversation_log(candidate_name, role)
 
-            # Concise instructions to keep OpenAI token and TTS costs low
+            # Concise instructions with comprehensive candidate resume context
+            exp_clause = f"Work experience: {experience_str}. " if experience_str else ""
             new_instructions = (
                 f"You are Sarah Mitchell, Principal Software Engineer and technical interviewer for {candidate_name} applying for {role}. "
-                f"Resume context: {skills_str}. Key project: {top_project}. "
-                f"Rules: Keep every response direct and strictly under 2 sentences. Address {candidate_name} by name, acknowledge answers concisely, and ask one focused technical question at a time."
+                f"Candidate resume context: Skills: {skills_str}. Key projects: {top_project}. {exp_clause}"
+                f"Rules: Keep every response direct, natural, and strictly under 2 sentences. Address {candidate_name} by name, acknowledge answers concisely, and ask one focused technical question at a time relevant to their resume."
             )
             try:
                 await agent.update_instructions(new_instructions)

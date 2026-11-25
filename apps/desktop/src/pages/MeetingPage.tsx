@@ -17,11 +17,7 @@ import {
   Video, 
   VideoOff, 
   PhoneOff,
-  AlertTriangle,
-  CheckCircle2,
-  Sparkles,
-  Laptop,
-  Camera
+  AlertTriangle
 } from 'lucide-react';
 
 export const MeetingPage: React.FC = () => {
@@ -45,7 +41,6 @@ export const MeetingPage: React.FC = () => {
   const [currentStep, setCurrentStep] = useState<
     'greeting' | 'desktop_check' | 'webcam_test' | 'ready' | 'in_progress'
   >('greeting');
-  const [stepMessage, setStepMessage] = useState<string>('Initializing interview chamber...');
   const [activeWarningApp, setActiveWarningApp] = useState<string | null>(null);
 
   const baselineAppsRef = useRef<string[]>([]);
@@ -66,12 +61,9 @@ export const MeetingPage: React.FC = () => {
       if (data.step) {
         setCurrentStep(data.step);
       }
-      if (data.message) {
-        setStepMessage(data.message);
-      }
 
       // When AI initiates webcam test step, run OpenCV face presence detection
-      // No warning is shown on the UI; if not detected, the AI speaks the warning directly
+      // No labels or text are shown on the UI; if not detected, the AI speaks the warning directly
       if (data.step === 'webcam_test') {
         setTimeout(async () => {
           try {
@@ -123,6 +115,7 @@ export const MeetingPage: React.FC = () => {
         candidateName: candidateName || 'Candidate',
         role: selectedRole,
         skills: parsedResume?.skills.all || [],
+        experience: parsedResume?.experience || [],
         projects: parsedResume?.projects || [],
         plan: interviewPlan,
         activeApps: filteredApps,
@@ -237,7 +230,6 @@ export const MeetingPage: React.FC = () => {
         // --- STEP 1: GREETINGS WITH MY NAME ---
         setCurrentStep('greeting');
         const greetingText = `Hi ${name}! Welcome to your ${role} interview.`;
-        setStepMessage(greetingText);
         await speakSafe(greetingText);
         await new Promise((r) => setTimeout(r, 500));
 
@@ -252,13 +244,11 @@ export const MeetingPage: React.FC = () => {
         const appListText = activeApps.slice(0, 4).join(', ');
 
         const desktopText = `Let me check your desktop environment. I can see ${appListText || 'several applications'} are active. You can close any applications that are not relevant to our interview.`;
-        setStepMessage(`Desktop: ${appListText || 'Active applications verified'}`);
         await speakSafe(desktopText);
         await new Promise((r) => setTimeout(r, 500));
 
         // --- STEP 3: WEBCAM TEST ---
         setCurrentStep('webcam_test');
-        setStepMessage('Testing webcam & candidate presence...');
         const webcamSpeech = `Now let me test your webcam.`;
 
         const presencePromise = detectCandidatePresence(videoRef.current);
@@ -276,12 +266,10 @@ export const MeetingPage: React.FC = () => {
         // --- STEP 4: ALL GOOD, LET'S START ---
         setCurrentStep('ready');
         const startSpeech = `All good! Let's start with the interview. To kick things off, tell me about your background and a challenging technical project you recently worked on.`;
-        setStepMessage("All good! Let's start with the interview.");
         await speakSafe(startSpeech);
         await new Promise((r) => setTimeout(r, 300));
 
         setCurrentStep('in_progress');
-        setStepMessage('Interview in progress');
       };
 
       runFallbackFlow();
@@ -397,40 +385,6 @@ export const MeetingPage: React.FC = () => {
                 <VideoOff className="w-10 h-10 mb-2 opacity-40" />
               </div>
             )}
-
-            {/* Subtle Step Status Pill */}
-            <div className="absolute top-3 left-3 bg-black/70 backdrop-blur-md px-3 py-1.5 rounded-xl border border-white/10 flex items-center gap-2 text-[11px] font-medium z-20">
-              {currentStep === 'greeting' && (
-                <>
-                  <Sparkles className="w-3.5 h-3.5 text-blue-400" />
-                  <span className="text-slate-300">Welcome & Greeting</span>
-                </>
-              )}
-              {currentStep === 'desktop_check' && (
-                <>
-                  <Laptop className="w-3.5 h-3.5 text-indigo-400" />
-                  <span className="text-indigo-300 truncate max-w-[240px]">{stepMessage}</span>
-                </>
-              )}
-              {currentStep === 'webcam_test' && (
-                <>
-                  <Camera className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
-                  <span className="text-amber-300">{stepMessage}</span>
-                </>
-              )}
-              {currentStep === 'ready' && (
-                <>
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                  <span className="text-emerald-300 font-semibold">{stepMessage}</span>
-                </>
-              )}
-              {currentStep === 'in_progress' && (
-                <>
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                  <span className="text-slate-300">Interview In Progress</span>
-                </>
-              )}
-            </div>
 
             {/* Participant Tag */}
             <div className="absolute bottom-3 left-3 bg-black/60 backdrop-blur-sm px-2.5 py-1 rounded-lg flex items-center gap-1.5 text-xs font-medium text-slate-200 z-20">
