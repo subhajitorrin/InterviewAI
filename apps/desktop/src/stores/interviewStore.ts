@@ -58,6 +58,7 @@ interface SimpleInterviewState {
   messages: MessageItem[];
 
   // Actions
+  setAiSpeaking: (speaking: boolean) => void;
   startInterview: () => void;
   endInterview: () => void;
   toggleMic: () => void;
@@ -92,6 +93,10 @@ export const useInterviewStore = create<SimpleInterviewState>((set, get) => ({
     set({ resumeFileName: null, candidateName: 'Candidate' });
   },
 
+  setAiSpeaking: (speaking: boolean) => {
+    set({ isAiSpeaking: speaking });
+  },
+
   // Call state
   isMicMuted: false,
   isVideoMuted: false,
@@ -115,21 +120,9 @@ export const useInterviewStore = create<SimpleInterviewState>((set, get) => ({
       questionIndex: 0,
       currentQuestion: firstQ,
       subtitlesText: firstQ,
-      isAiSpeaking: true,
-      messages: [
-        {
-          id: `ai-${Date.now()}`,
-          sender: 'ai',
-          text: firstQ,
-          time: '00:01'
-        }
-      ]
+      isAiSpeaking: false,
+      messages: []
     });
-
-    // Simulate AI speaking the question for 4 seconds then listening
-    setTimeout(() => {
-      set({ isAiSpeaking: false });
-    }, 4000);
   },
 
   endInterview: () => {

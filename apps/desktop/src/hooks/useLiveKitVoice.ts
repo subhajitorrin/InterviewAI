@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { Room, RoomEvent, Track, RemoteTrack } from 'livekit-client';
+import { Room, RoomEvent, Track, RemoteTrack, RemoteParticipant } from 'livekit-client';
 
 export interface UseLiveKitVoiceOptions {
   roomName?: string;
@@ -19,85 +19,198 @@ export function useLiveKitVoice({
   onAiSpeakingChange,
 }: UseLiveKitVoiceOptions) {
   const roomRef = useRef<Room | null>(null);
-  const audioElRef = useRef<HTMLAudioElement | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Initialize hidden audio element for remote AI voice playback
-  useEffect(() => {
-    const audio = document.createElement('audio');
-    audio.autoplay = true;
-    audioElRef.current = audio;
-    document.body.appendChild(audio);
+  // Keep latest callbacks in refs so changes don't invalidate connect() callback
+  const callbacksRef = useRef({ onConnected, onDisconnected, onAiSpeakingChange });
+  callbacksRef.current = { onConnected, onDisconnected, onAiSpeakingChange };
 
-    return () => {
-      audio.remove();
-      audioElRef.current = null;
-    };
+  const isMicMutedRef = useRef(isMicMuted);
+  isMicMutedRef.current = isMicMuted;
+
+  // Prevent overlapping concurrent connection attempts
+  const isConnectingRef = useRef(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Track and clean up all attached audio elements to prevent audio leaks/repeating echoes
+  const cleanupAudioElements = useCallback(() => {
+    const existingAudio = document.querySelectorAll('.livekit-remote-audio-track');
+    existingAudio.forEach((el) => {
+      try {
+        (el as HTMLAudioElement).pause();
+        el.remove();
+      } catch {}
+    });
   }, []);
 
+  const disconnect = useCallback(async () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    isConnectingRef.current = false;
+
+    if (roomRef.current) {
+      const room = roomRef.current;
+      roomRef.current = null;
+      try {
+        await room.disconnect();
+      } catch (e) {
+        console.warn('[LiveKit] Disconnect error:', e);
+      }
+    }
+
+    cleanupAudioElements();
+    setIsConnected(false);
+    callbacksRef.current.onDisconnected?.();
+  }, [cleanupAudioElements]);
+
   const connect = useCallback(async () => {
+    // Prevent overlapping connection attempts
+    if (isConnectingRef.current) {
+      console.log('[LiveKit] Connection already in progress, ignoring duplicate call');
+      return;
+    }
+
+    // Already connected to the same room
+    if (roomRef.current && roomRef.current.state === 'connected' && roomRef.current.name === roomName) {
+      console.log('[LiveKit] Already connected to room:', roomName);
+      return;
+    }
+
     try {
+      isConnectingRef.current = true;
       setError(null);
-      const room = new Room({
-        adaptiveStream: true,
-        dynacast: true,
-      });
-      roomRef.current = room;
 
-      // Listen for remote audio track from AI agent
-      room.on(RoomEvent.TrackSubscribed, (track: RemoteTrack) => {
-        if (track.kind === Track.Kind.Audio && audioElRef.current) {
-          track.attach(audioElRef.current);
-        }
-      });
+      // Cancel any ongoing attempt and cleanly disconnect existing room
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+      const abortController = new AbortController();
+      abortControllerRef.current = abortController;
 
-      room.on(RoomEvent.ActiveSpeakersChanged, (speakers) => {
-        const isAiSpeaking = speakers.some((s) => s.identity.includes('agent') || s.name?.includes('Dr. Sarah') || !s.isLocal);
-        onAiSpeakingChange?.(isAiSpeaking);
-      });
+      if (roomRef.current) {
+        await roomRef.current.disconnect();
+        roomRef.current = null;
+      }
+      cleanupAudioElements();
 
-      room.on(RoomEvent.Disconnected, () => {
-        setIsConnected(false);
-        onDisconnected?.();
-      });
+      if (abortController.signal.aborted) return;
 
       // Fetch JWT token
       let token = '';
       if ((window as any).electronAPI?.getLiveKitToken) {
         token = await (window as any).electronAPI.getLiveKitToken(roomName, participantName);
       } else {
-        // Fallback for standalone web dev mode: use local dev token endpoint or basic token
-        token = 'dev-token';
+        const res = await fetch(`/api/token?room=${encodeURIComponent(roomName)}&name=${encodeURIComponent(participantName)}`);
+        const data = await res.json();
+        token = data.token;
       }
+
+      if (abortController.signal.aborted) return;
+      if (!token) throw new Error('No valid token received');
+
+      const room = new Room({
+        adaptiveStream: true,
+        dynacast: true,
+        audioCaptureDefaults: {
+          autoGainControl: true,
+          echoCancellation: true,
+          noiseSuppression: true,
+        },
+      });
+
+      // Handle remote audio tracks: ONLY play tracks from the AI Agent, NEVER from candidate
+      const handleTrackSubscribed = (track: RemoteTrack, _publication: any, participant: RemoteParticipant) => {
+        // Never play local tracks
+        if (participant.isLocal) return;
+
+        // Never play tracks from candidate participants (prevents feedback/self-echo loop)
+        const isCandidate = participant.identity.toLowerCase().startsWith('candidate') ||
+                            participant.name?.toLowerCase() === 'candidate';
+        if (isCandidate) {
+          console.warn(`[LiveKit] Ignored audio track from non-agent participant: ${participant.identity}`);
+          return;
+        }
+
+        if (track.kind === Track.Kind.Audio) {
+          const el = track.attach();
+          el.className = 'livekit-remote-audio-track';
+          document.body.appendChild(el);
+          el.play().catch((e) => console.warn('[LiveKit] Remote audio play error:', e));
+          console.log(`[LiveKit] Attached and playing AI voice track from: ${participant.identity}`);
+        }
+      };
+
+      room.on(RoomEvent.TrackSubscribed, handleTrackSubscribed);
+
+      room.on(RoomEvent.TrackUnsubscribed, (track: RemoteTrack) => {
+        if (track.kind === Track.Kind.Audio) {
+          track.detach().forEach((el) => {
+            try {
+              (el as HTMLAudioElement).pause();
+              el.remove();
+            } catch {}
+          });
+        }
+      });
+
+      room.on(RoomEvent.ActiveSpeakersChanged, (speakers) => {
+        // AI is speaking if there is an active speaker that is remote and not a candidate
+        const isAiSpeaking = speakers.some(
+          (s) => !s.isLocal && !s.identity.toLowerCase().startsWith('candidate')
+        );
+        callbacksRef.current.onAiSpeakingChange?.(isAiSpeaking);
+      });
+
+      room.on(RoomEvent.Disconnected, () => {
+        cleanupAudioElements();
+        setIsConnected(false);
+        callbacksRef.current.onDisconnected?.();
+      });
 
       const livekitUrl = (import.meta as any).env?.VITE_LIVEKIT_URL || 'ws://127.0.0.1:7880';
       await room.connect(livekitUrl, token);
+
+      if (abortController.signal.aborted) {
+        await room.disconnect();
+        return;
+      }
+
+      roomRef.current = room;
       setIsConnected(true);
-      onConnected?.();
+      callbacksRef.current.onConnected?.();
 
-      // Enable microphone input to send to Deepgram STT
-      await room.localParticipant.setMicrophoneEnabled(!isMicMuted);
+      // Enable microphone according to current mute state
+      try {
+        await room.localParticipant.setMicrophoneEnabled(!isMicMutedRef.current);
+      } catch (micErr: any) {
+        console.error('[LiveKit] Microphone enable error:', micErr);
+      }
     } catch (err: any) {
-      console.warn('LiveKit local connection:', err.message);
+      console.warn('[LiveKit] Connection error:', err.message);
       setError(err.message);
+    } finally {
+      isConnectingRef.current = false;
     }
-  }, [roomName, participantName, isMicMuted, onConnected, onDisconnected, onAiSpeakingChange]);
+  }, [roomName, participantName, cleanupAudioElements]);
 
-  const disconnect = useCallback(async () => {
-    if (roomRef.current) {
-      await roomRef.current.disconnect();
-      roomRef.current = null;
-      setIsConnected(false);
-    }
-  }, []);
-
-  // Update microphone mute state
+  // Handle microphone mute toggle without triggering reconnect
   useEffect(() => {
     if (roomRef.current?.localParticipant) {
-      roomRef.current.localParticipant.setMicrophoneEnabled(!isMicMuted).catch(() => {});
+      roomRef.current.localParticipant.setMicrophoneEnabled(!isMicMuted).catch((err) => {
+        console.warn('[LiveKit] Failed to toggle mic state:', err);
+      });
     }
   }, [isMicMuted]);
+
+  // Clean up completely on unmount
+  useEffect(() => {
+    return () => {
+      disconnect();
+    };
+  }, [disconnect]);
 
   return {
     connect,

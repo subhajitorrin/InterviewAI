@@ -80,6 +80,14 @@ class _PiperChunkedStream(ChunkedStream):
             self._piper_bin,
             "-m",
             self._model_path,
+            "--length-scale",
+            "1.05",
+            "--noise-scale",
+            "0.667",
+            "--noise-w-scale",
+            "0.8",
+            "--sentence-silence",
+            "0.2",
             "--output-raw",  # raw 16-bit 22050Hz mono PCM directly to stdout
         ]
 

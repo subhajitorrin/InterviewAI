@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useCallback } from 'react';
 import { useInterviewStore } from '../stores/interviewStore';
 import { useLiveKitVoice } from '../hooks/useLiveKitVoice';
 import { 
@@ -15,6 +15,7 @@ export const MeetingPage: React.FC = () => {
     isMicMuted,
     isVideoMuted,
     isAiSpeaking,
+    candidateName,
     toggleMic,
     toggleVideo,
     endInterview
@@ -23,13 +24,20 @@ export const MeetingPage: React.FC = () => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
-  // Connect to LiveKit audio room for real-time Piper TTS & Deepgram STT
+  // Stable handler for speaking changes
+  const handleAiSpeakingChange = useCallback((speaking: boolean) => {
+    useInterviewStore.getState().setAiSpeaking(speaking);
+  }, []);
+
+  // Connect to LiveKit audio room for real-time AI voice conversation
   const { connect, disconnect } = useLiveKitVoice({
     roomName: 'interview-room-1',
-    participantName: 'Candidate',
+    participantName: candidateName || 'Candidate',
     isMicMuted,
+    onAiSpeakingChange: handleAiSpeakingChange,
   });
 
+  // Connect once on mount, disconnect on unmount
   useEffect(() => {
     connect();
     return () => {
@@ -126,7 +134,7 @@ export const MeetingPage: React.FC = () => {
               ) : (
                 <Mic className="w-3.5 h-3.5 text-slate-300" />
               )}
-              <span>You</span>
+              <span>You ({candidateName || 'Candidate'})</span>
             </div>
           </div>
 
@@ -146,7 +154,7 @@ export const MeetingPage: React.FC = () => {
             {/* Participant Tag */}
             <div className="absolute bottom-3 left-3 bg-black/60 backdrop-blur-sm px-2.5 py-1 rounded-lg flex items-center gap-1.5 text-xs font-medium text-slate-200">
               <span className={`w-2 h-2 rounded-full ${isAiSpeaking ? 'bg-blue-400 animate-pulse' : 'bg-slate-500'}`} />
-              <span>AI Interviewer</span>
+              <span>AI Interviewer (Dr. Sarah Vance)</span>
             </div>
           </div>
 
