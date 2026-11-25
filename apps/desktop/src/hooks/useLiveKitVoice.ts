@@ -9,6 +9,7 @@ export interface UseLiveKitVoiceOptions {
   onConnected?: () => void;
   onDisconnected?: () => void;
   onAiSpeakingChange?: (isSpeaking: boolean) => void;
+  onDataReceived?: (data: any) => void;
 }
 
 export function useLiveKitVoice({
@@ -19,6 +20,7 @@ export function useLiveKitVoice({
   onConnected,
   onDisconnected,
   onAiSpeakingChange,
+  onDataReceived,
 }: UseLiveKitVoiceOptions) {
   const roomRef = useRef<Room | null>(null);
   const [isConnected, setIsConnected] = useState(false);
@@ -26,8 +28,8 @@ export function useLiveKitVoice({
   const [aiAudioLevel, setAiAudioLevel] = useState(0);
 
   // Keep latest callbacks in refs so changes don't invalidate connect() callback
-  const callbacksRef = useRef({ onConnected, onDisconnected, onAiSpeakingChange });
-  callbacksRef.current = { onConnected, onDisconnected, onAiSpeakingChange };
+  const callbacksRef = useRef({ onConnected, onDisconnected, onAiSpeakingChange, onDataReceived });
+  callbacksRef.current = { onConnected, onDisconnected, onAiSpeakingChange, onDataReceived };
 
   const isMicMutedRef = useRef(isMicMuted);
   isMicMutedRef.current = isMicMuted;
@@ -85,7 +87,7 @@ export function useLiveKitVoice({
     callbacksRef.current.onDisconnected?.();
   }, [cleanupAudioElements]);
 
-  const connect = useCallback(async () => {
+  const connect = useCallback(async (customMetadata?: string) => {
     // Prevent overlapping connection attempts
     if (isConnectingRef.current) {
       console.log('[LiveKit] Connection already in progress, ignoring duplicate call');
@@ -117,13 +119,22 @@ export function useLiveKitVoice({
 
       if (abortController.signal.aborted) return;
 
+      const effectiveMetadata = customMetadata !== undefined ? customMetadata : metadata;
+
       // Fetch JWT token
       let token = '';
       if ((window as any).electronAPI?.getLiveKitToken) {
-        token = await (window as any).electronAPI.getLiveKitToken(roomName, participantName, metadata);
+        token = await (window as any).electronAPI.getLiveKitToken(roomName, participantName, effectiveMetadata);
       } else {
-        const metadataParam = metadata ? `&metadata=${encodeURIComponent(metadata)}` : '';
-        const res = await fetch(`/api/token?room=${encodeURIComponent(roomName)}&name=${encodeURIComponent(participantName)}${metadataParam}`);
+        const res = await fetch('/api/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            room: roomName,
+            name: participantName,
+            metadata: effectiveMetadata,
+          }),
+        });
         const data = await res.json();
         token = data.token;
       }
@@ -244,6 +255,16 @@ export function useLiveKitVoice({
         }
       });
 
+      room.on(RoomEvent.DataReceived, (payload: Uint8Array) => {
+        try {
+          const str = new TextDecoder().decode(payload);
+          const data = JSON.parse(str);
+          callbacksRef.current.onDataReceived?.(data);
+        } catch (e) {
+          console.warn('[LiveKit] Data decode error:', e);
+        }
+      });
+
       room.on(RoomEvent.Disconnected, () => {
         cleanupAudioElements();
         setIsConnected(false);
@@ -283,6 +304,18 @@ export function useLiveKitVoice({
     }
   }, [roomName, participantName, cleanupAudioElements]);
 
+  const sendData = useCallback(async (data: any) => {
+    if (roomRef.current?.localParticipant) {
+      try {
+        const str = JSON.stringify(data);
+        const encoded = new TextEncoder().encode(str);
+        await roomRef.current.localParticipant.publishData(encoded, { reliable: true });
+      } catch (err) {
+        console.warn('[LiveKit] sendData error:', err);
+      }
+    }
+  }, []);
+
   // Handle microphone mute toggle without triggering reconnect
   useEffect(() => {
     if (roomRef.current?.localParticipant) {
@@ -302,6 +335,7 @@ export function useLiveKitVoice({
   return {
     connect,
     disconnect,
+    sendData,
     isConnected,
     aiAudioLevel,
     error,

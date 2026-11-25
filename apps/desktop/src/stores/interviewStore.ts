@@ -7,6 +7,7 @@ import {
   SAMPLE_RESUME_TEXT,
   parseResume
 } from '../utils/resumeParser';
+import { appendConversationLog } from '../utils/conversationLogger';
 
 export interface MessageItem {
   id: string;
@@ -317,6 +318,7 @@ export const useInterviewStore = create<SimpleInterviewState>((set, get) => ({
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       window.speechSynthesis.cancel();
     }
+    appendConversationLog('SYSTEM', '--- INTERVIEW SESSION ENDED ---');
     set({
       currentPage: 'setup',
       isAiSpeaking: false,
@@ -332,7 +334,8 @@ export const useInterviewStore = create<SimpleInterviewState>((set, get) => ({
   toggleCaptions: () => set((s) => ({ showCaptions: !s.showCaptions })),
 
   submitUserSpeech: (text: string) => {
-    const { messages, callSeconds, interviewPlan, questionIndex } = get();
+    const { messages, callSeconds, interviewPlan, questionIndex, candidateName } = get();
+    appendConversationLog(`Candidate (${candidateName || 'User'})`, text);
 
     const formatTime = (s: number) => {
       const mins = Math.floor(s / 60).toString().padStart(2, '0');
@@ -388,6 +391,8 @@ export const useInterviewStore = create<SimpleInterviewState>((set, get) => ({
           ]
         });
 
+        appendConversationLog('AI (Sarah Mitchell)', nextQ);
+
         speakSpeechFallback(
           nextQ,
           () => set({ isAiSpeaking: true }),
@@ -438,6 +443,8 @@ export const useInterviewStore = create<SimpleInterviewState>((set, get) => ({
         }
       ]
     });
+
+    appendConversationLog('AI (Sarah Mitchell)', nextQ);
 
     speakSpeechFallback(
       nextQ,

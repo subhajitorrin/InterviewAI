@@ -1,7 +1,20 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'path';
+import fs from 'fs';
 import { getRunningMacApps } from './system-monitor';
 import { createParticipantToken } from './livekit-token';
+
+function getLogFilePath(): string {
+  const cwd = process.cwd();
+  if (fs.existsSync(path.join(cwd, 'packages')) || fs.existsSync(path.join(cwd, 'apps'))) {
+    return path.join(cwd, 'conversation.log');
+  }
+  const parent = path.resolve(cwd, '..');
+  if (fs.existsSync(path.join(parent, 'packages')) || fs.existsSync(path.join(parent, 'apps'))) {
+    return path.join(parent, 'conversation.log');
+  }
+  return path.resolve(__dirname, '../../conversation.log');
+}
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -60,6 +73,40 @@ ipcMain.handle('system:getDeviceInfo', async () => {
     electronVersion: process.versions.electron,
     nodeVersion: process.versions.node,
   };
+});
+
+ipcMain.handle('log:init', async (_event, { candidateName, role }: { candidateName: string; role: string }) => {
+  try {
+    const logPath = getLogFilePath();
+    const header = [
+      '================================================================================',
+      'INTERVIEW CONVERSATION LOG',
+      `Candidate: ${candidateName || 'Candidate'}`,
+      `Target Role: ${role || 'Engineering'}`,
+      `Started At: ${new Date().toLocaleString()}`,
+      '================================================================================',
+      '',
+    ].join('\n');
+    await fs.promises.writeFile(logPath, header, 'utf-8');
+    return true;
+  } catch (err) {
+    console.warn('Failed to initialize conversation log:', err);
+    return false;
+  }
+});
+
+ipcMain.handle('log:append', async (_event, { speaker, text }: { speaker: string; text: string }) => {
+  try {
+    if (!text || !text.trim()) return false;
+    const logPath = getLogFilePath();
+    const time = new Date().toLocaleTimeString();
+    const line = `[${time}] [${speaker}]: ${text.trim()}\n`;
+    await fs.promises.appendFile(logPath, line, 'utf-8');
+    return true;
+  } catch (err) {
+    console.warn('Failed to append to conversation log:', err);
+    return false;
+  }
 });
 
 app.whenReady().then(() => {
