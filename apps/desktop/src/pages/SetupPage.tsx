@@ -1,11 +1,13 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import { useInterviewStore, ROLES_LIST } from '../stores/interviewStore';
+import { extractTextFromFile, parseResume } from '../utils/resumeParser';
 import { 
   FileText, 
   UploadCloud, 
   CheckCircle2, 
   Trash2, 
-  ArrowRight
+  ArrowRight,
+  Loader2
 } from 'lucide-react';
 
 export const SetupPage: React.FC = () => {
@@ -13,17 +15,32 @@ export const SetupPage: React.FC = () => {
     selectedRole, 
     setSelectedRole, 
     resumeFileName, 
-    setResumeFile, 
+    candidateName,
+    setParsedResume,
     clearResume, 
     startInterview 
   } = useInterviewStore();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isLoading, setIsLoading] = useState(false);
+
+  const handleFileProcess = async (file: File) => {
+    try {
+      setIsLoading(true);
+      const text = await extractTextFromFile(file);
+      const parsed = parseResume(text, file.name);
+      setParsedResume(parsed, file.name);
+    } catch (err) {
+      console.error('Failed to parse resume:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      setResumeFile(file.name);
+      handleFileProcess(file);
     }
   };
 
@@ -31,7 +48,7 @@ export const SetupPage: React.FC = () => {
     e.preventDefault();
     const file = e.dataTransfer.files?.[0];
     if (file) {
-      setResumeFile(file.name);
+      handleFileProcess(file);
     }
   };
 
@@ -53,12 +70,17 @@ export const SetupPage: React.FC = () => {
           <input
             ref={fileInputRef}
             type="file"
-            accept=".pdf,.doc,.docx"
+            accept=".pdf,.doc,.docx,.txt"
             className="hidden"
             onChange={handleFileUpload}
           />
 
-          {!resumeFileName ? (
+          {isLoading ? (
+            <div className="border border-slate-700 bg-[#0E1117] rounded-2xl p-6 text-center flex flex-col items-center justify-center gap-2">
+              <Loader2 className="w-6 h-6 text-blue-500 animate-spin" />
+              <p className="text-xs text-slate-300">Preparing resume context...</p>
+            </div>
+          ) : !resumeFileName ? (
             <div
               onDragOver={(e) => e.preventDefault()}
               onDrop={handleDrop}
@@ -72,21 +94,28 @@ export const SetupPage: React.FC = () => {
             </div>
           ) : (
             <div className="flex items-center justify-between p-3.5 rounded-2xl bg-[#0E1117] border border-slate-700">
-              <div className="flex items-center gap-2.5">
-                <FileText className="w-4 h-4 text-blue-400" />
-                <span className="text-xs font-medium text-white truncate max-w-[220px]">
+              <div className="flex items-center gap-2.5 truncate">
+                <FileText className="w-4 h-4 text-blue-400 shrink-0" />
+                <span className="text-xs font-medium text-white truncate max-w-[200px]">
                   {resumeFileName}
                 </span>
                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
               </div>
 
-              <button
-                onClick={clearResume}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-slate-800 transition-colors"
-                title="Remove"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-              </button>
+              <div className="flex items-center gap-2">
+                {candidateName && candidateName !== 'Candidate' && (
+                  <span className="text-[10px] text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded-full border border-blue-500/20 font-medium">
+                    {candidateName}
+                  </span>
+                )}
+                <button
+                  onClick={clearResume}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-slate-800 transition-colors"
+                  title="Remove"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -113,9 +142,10 @@ export const SetupPage: React.FC = () => {
         {/* 3. Start Interview Button */}
         <button
           onClick={startInterview}
-          className="w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs shadow-lg shadow-blue-600/20 transition-all flex items-center justify-center gap-1.5"
+          disabled={isLoading}
+          className="w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-semibold text-xs shadow-lg shadow-blue-600/20 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
         >
-          <span>Start Interview</span>
+          <span>{isLoading ? 'Preparing Context...' : 'Start Interview'}</span>
           <ArrowRight className="w-3.5 h-3.5" />
         </button>
 

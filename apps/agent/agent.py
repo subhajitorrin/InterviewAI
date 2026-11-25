@@ -1,4 +1,5 @@
 import os
+import json
 import asyncio
 import logging
 from pathlib import Path
@@ -57,10 +58,10 @@ async def entrypoint(ctx: JobContext):
     vad_plugin = silero.VAD.load()
 
     instructions = (
-        "You are an encouraging, professional AI Technical Interviewer. "
+        "You are Sarah Mitchell, a Principal Software Engineer and executive AI technical interviewer at a top technology company. "
         "Keep your conversational responses direct, warm, concise, and natural (1-2 sentences). "
         "Never repeat yourself. Converse smoothly with the candidate. "
-        "When the candidate answers, acknowledge their response concisely and ask the next technical question."
+        "Acknowledge their responses thoughtfully and progress through the technical interview plan."
     )
 
     agent = Agent(
@@ -103,7 +104,7 @@ async def entrypoint(ctx: JobContext):
     # Re-link audio stream if participant connects or reconnects
     @ctx.room.on("participant_connected")
     def on_participant_connected(participant):
-        logger.info(f"👤 Candidate connected: {participant.identity}")
+        logger.info(f"👤 Candidate connected: {participant.identity}, metadata: {participant.metadata}")
         if hasattr(session, "_room_io") and session._room_io:
             session._room_io.set_participant(participant.identity)
 
@@ -111,9 +112,45 @@ async def entrypoint(ctx: JobContext):
     async def initial_greeting():
         try:
             logger.info("⏳ Waiting for candidate participant to join room...")
-            await ctx.wait_for_participant()
-            logger.info("👤 Candidate participant detected.")
+            candidate = await ctx.wait_for_participant()
+            logger.info(f"👤 Candidate participant detected: {candidate.identity}")
             
+            # Extract candidate metadata (passed in token)
+            candidate_name = candidate.name or "Candidate"
+            role = "Software Engineer"
+            skills_str = "distributed systems, cloud architecture, and modern full-stack development"
+            top_project = "key production systems"
+            plan_summary = "5-stage technical interview"
+
+            if candidate.metadata:
+                try:
+                    meta = json.loads(candidate.metadata)
+                    if meta.get("candidateName"):
+                        candidate_name = meta["candidateName"]
+                    if meta.get("role"):
+                        role = meta["role"]
+                    if meta.get("skills"):
+                        skills_list = meta["skills"]
+                        if isinstance(skills_list, list) and skills_list:
+                            skills_str = ", ".join(skills_list[:4])
+                    if meta.get("projects"):
+                        proj_list = meta["projects"]
+                        if isinstance(proj_list, list) and proj_list and isinstance(proj_list[0], dict):
+                            top_project = proj_list[0].get("title", top_project)
+                    if meta.get("plan") and isinstance(meta["plan"], dict):
+                        plan_phases = meta["plan"].get("phases", [])
+                        if plan_phases:
+                            plan_summary = "; ".join([f"Phase {p.get('phaseNumber')}: {p.get('title')}" for p in plan_phases])
+                except Exception as meta_err:
+                    logger.warning(f"Error parsing candidate metadata: {meta_err}")
+
+            # Concise instructions to keep token usage low
+            agent.instructions = (
+                f"You are Sarah Mitchell, technical interviewer for {candidate_name} ({role}). "
+                f"Resume context: {skills_str}. "
+                f"Rules: Keep every response direct and under 2 sentences. Address {candidate_name} by name, acknowledge answers concisely, and ask one focused technical question at a time."
+            )
+
             # Wait for RoomIO to complete audio setup and publish the audio track
             if hasattr(session, "_room_io") and session._room_io:
                 logger.info("⏳ Waiting for RoomIO audio output to be ready...")
@@ -132,9 +169,20 @@ async def entrypoint(ctx: JobContext):
             # Small 0.5s pause to ensure browser audio element is unmuted and attached
             await asyncio.sleep(0.5)
             
-            logger.info("🔊 Generating initial greeting speech...")
+            logger.info(f"🔊 Generating personalized greeting speech for {candidate_name}...")
+            has_resume = bool(candidate_name and candidate_name.lower() != "candidate")
+            if has_resume:
+                personalized_greeting = (
+                    f"Hi {candidate_name}! Welcome to your {role} interview. "
+                    f"I've reviewed your resume and prepared our plan. How are you doing today?"
+                )
+            else:
+                personalized_greeting = (
+                    f"Hi there! Welcome to your {role} interview. "
+                    f"I've prepared our interview plan. How are you doing today?"
+                )
             handle = session.say(
-                "Hi there! I'm your AI Interviewer. How are you doing today?",
+                personalized_greeting,
                 allow_interruptions=False,
             )
             await handle

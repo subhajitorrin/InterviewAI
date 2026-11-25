@@ -4,6 +4,7 @@ import { Room, RoomEvent, Track, RemoteTrack, RemoteParticipant } from 'livekit-
 export interface UseLiveKitVoiceOptions {
   roomName?: string;
   participantName?: string;
+  metadata?: string;
   isMicMuted?: boolean;
   onConnected?: () => void;
   onDisconnected?: () => void;
@@ -13,6 +14,7 @@ export interface UseLiveKitVoiceOptions {
 export function useLiveKitVoice({
   roomName = 'interview-room-1',
   participantName = 'Candidate',
+  metadata,
   isMicMuted = false,
   onConnected,
   onDisconnected,
@@ -118,9 +120,10 @@ export function useLiveKitVoice({
       // Fetch JWT token
       let token = '';
       if ((window as any).electronAPI?.getLiveKitToken) {
-        token = await (window as any).electronAPI.getLiveKitToken(roomName, participantName);
+        token = await (window as any).electronAPI.getLiveKitToken(roomName, participantName, metadata);
       } else {
-        const res = await fetch(`/api/token?room=${encodeURIComponent(roomName)}&name=${encodeURIComponent(participantName)}`);
+        const metadataParam = metadata ? `&metadata=${encodeURIComponent(metadata)}` : '';
+        const res = await fetch(`/api/token?room=${encodeURIComponent(roomName)}&name=${encodeURIComponent(participantName)}${metadataParam}`);
         const data = await res.json();
         token = data.token;
       }

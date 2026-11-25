@@ -3,14 +3,14 @@ import { contextBridge, ipcRenderer } from 'electron';
 export interface ElectronAPI {
   getRunningApps: () => Promise<Array<{ name: string; bundleId: string; category: string }>>;
   getDeviceInfo: () => Promise<{ platform: string; arch: string; electronVersion: string; nodeVersion: string }>;
-  getLiveKitToken: (roomName: string, participantName?: string) => Promise<string>;
+  getLiveKitToken: (roomName: string, participantName?: string, metadata?: string) => Promise<string>;
 }
 
 const api: ElectronAPI = {
   getRunningApps: () => ipcRenderer.invoke('system:getRunningApps'),
   getDeviceInfo: () => ipcRenderer.invoke('system:getDeviceInfo'),
-  getLiveKitToken: (roomName: string, participantName?: string) =>
-    ipcRenderer.invoke('livekit:getToken', { roomName, participantName }),
+  getLiveKitToken: (roomName: string, participantName?: string, metadata?: string) =>
+    ipcRenderer.invoke('livekit:getToken', { roomName, participantName, metadata }),
 };
 
 contextBridge.exposeInMainWorld('electronAPI', api);

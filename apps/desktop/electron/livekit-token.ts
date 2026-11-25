@@ -5,7 +5,8 @@ const LIVEKIT_API_SECRET = process.env.LIVEKIT_API_SECRET || 'secret';
 
 export async function createParticipantToken(
   roomName: string,
-  participantName: string = 'Candidate'
+  participantName: string = 'Candidate',
+  metadata?: string
 ): Promise<string> {
   // Use deterministic identity so LiveKit enforces single session per candidate,
   // preventing duplicate ghost participants from causing audio echo loops.
@@ -14,6 +15,7 @@ export async function createParticipantToken(
   const at = new AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET, {
     identity: normalizedIdentity,
     name: participantName,
+    metadata: metadata || undefined,
     ttl: '2h',
   });
 

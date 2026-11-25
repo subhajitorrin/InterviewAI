@@ -45,8 +45,8 @@ function createWindow() {
 }
 
 // IPC Handlers
-ipcMain.handle('livekit:getToken', async (_event, { roomName, participantName }: { roomName: string; participantName?: string }) => {
-  return await createParticipantToken(roomName, participantName);
+ipcMain.handle('livekit:getToken', async (_event, { roomName, participantName, metadata }: { roomName: string; participantName?: string; metadata?: string }) => {
+  return await createParticipantToken(roomName, participantName, metadata);
 });
 
 ipcMain.handle('system:getRunningApps', async () => {

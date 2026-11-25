@@ -15,6 +15,7 @@ export default defineConfig({
             const url = new URL(req.url || '', `http://${req.headers.host}`);
             const roomName = url.searchParams.get('room') || 'interview-room-1';
             const participantName = url.searchParams.get('name') || 'Candidate';
+            const metadata = url.searchParams.get('metadata') || undefined;
 
             const apiKey = process.env.LIVEKIT_API_KEY || 'devkey';
             const apiSecret = process.env.LIVEKIT_API_SECRET || 'secret';
@@ -26,6 +27,7 @@ export default defineConfig({
             const at = new AccessToken(apiKey, apiSecret, {
               identity: normalizedIdentity,
               name: participantName,
+              metadata,
               ttl: '2h',
             });
 

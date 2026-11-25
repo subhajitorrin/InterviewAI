@@ -16,6 +16,9 @@ export const MeetingPage: React.FC = () => {
     isVideoMuted,
     isAiSpeaking,
     candidateName,
+    selectedRole,
+    parsedResume,
+    interviewPlan,
     toggleMic,
     toggleVideo,
     endInterview
@@ -33,6 +36,13 @@ export const MeetingPage: React.FC = () => {
   const { connect, disconnect, aiAudioLevel } = useLiveKitVoice({
     roomName: 'interview-room-1',
     participantName: candidateName || 'Candidate',
+    metadata: JSON.stringify({
+      candidateName,
+      role: selectedRole,
+      skills: parsedResume?.skills.all || [],
+      projects: parsedResume?.projects || [],
+      plan: interviewPlan,
+    }),
     isMicMuted,
     onAiSpeakingChange: handleAiSpeakingChange,
   });
@@ -134,7 +144,7 @@ export const MeetingPage: React.FC = () => {
               ) : (
                 <Mic className="w-3.5 h-3.5 text-slate-300" />
               )}
-              <span>You</span>
+              <span>{candidateName || 'You'}</span>
             </div>
           </div>
 
@@ -155,7 +165,7 @@ export const MeetingPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Bottom Zoom Control Bar */}
+      {/* Bottom Control Bar */}
       <div className="h-16 flex items-center justify-center gap-4">
         {/* Mute / Unmute */}
         <button
