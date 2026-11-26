@@ -40,8 +40,12 @@ export interface PresenceCheckResult {
   facesCount?: number;
 }
 
+let sharedCanvas: HTMLCanvasElement | null = null;
+let sharedCtx: CanvasRenderingContext2D | null = null;
+let isCheckInProgress = false;
+
 /**
- * Checks candidate presence on webcam using OpenCV Face/Upper-Body and central occupancy detection.
+ * Checks candidate presence on webcam using OpenCV Face/Upper-Body and biometric verification.
  */
 export async function detectCandidatePresence(video: HTMLVideoElement | null): Promise<PresenceCheckResult> {
   if (!video) {
@@ -70,63 +74,111 @@ export async function detectCandidatePresence(video: HTMLVideoElement | null): P
     };
   }
 
-  // Ensure video element has loaded and has valid frames
+  // Ensure video element has loaded and has valid dimensions
   if (video.videoWidth === 0 || video.videoHeight === 0 || video.readyState < 2) {
     return {
       cameraActive: true,
-      isPresent: true,
+      isPresent: false,
       reason: 'Camera stream initializing',
-      method: 'stream-ready-pass'
+      method: 'stream-initializing'
     };
   }
 
-  // Capture current webcam snapshot from video element
-  // 480x360 provides optimal clarity for face & eye feature recognition
-  let base64Image = '';
-  try {
-    const canvas = document.createElement('canvas');
-    canvas.width = 480;
-    canvas.height = 360;
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    if (ctx) {
-      ctx.drawImage(video, 0, 0, 480, 360);
-      base64Image = canvas.toDataURL('image/jpeg', 0.88);
-    }
-  } catch (canvasErr) {
-    console.warn('Failed to capture video snapshot for OpenCV:', canvasErr);
+  // Prevent overlapping concurrent checks from lagging the pipeline
+  if (isCheckInProgress) {
+    return {
+      cameraActive: true,
+      isPresent: false,
+      reason: 'Detection in progress',
+      method: 'throttled'
+    };
   }
 
-  // Primary: OpenCV Face Detection (via Electron IPC or Vite middleware)
-  if (base64Image) {
+  isCheckInProgress = true;
+
+  try {
+    // Reusable canvas (320x240) for fast sub-millisecond snapshotting
+    if (!sharedCanvas) {
+      sharedCanvas = document.createElement('canvas');
+      sharedCanvas.width = 320;
+      sharedCanvas.height = 240;
+      sharedCtx = sharedCanvas.getContext('2d', { willReadFrequently: true });
+    }
+
+    if (!sharedCtx) {
+      return {
+        cameraActive: true,
+        isPresent: false,
+        reason: 'Canvas context unavailable',
+        method: 'no-canvas'
+      };
+    }
+
+    sharedCtx.drawImage(video, 0, 0, 320, 240);
+
+    // Fast client-side brightness check
     try {
-      let opencvResult: any = null;
-
-      if ((window as any).electronAPI?.detectPresenceWithOpenCV) {
-        opencvResult = await (window as any).electronAPI.detectPresenceWithOpenCV(base64Image);
-      } else {
-        const res = await fetch('/api/opencv/detect-presence', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image: base64Image }),
-        });
-        if (res.ok) {
-          opencvResult = await res.json();
-        }
+      const sample = sharedCtx.getImageData(0, 0, 320, 240).data;
+      let totalBrightness = 0;
+      // Sample every 16th pixel for sub-millisecond brightness check
+      const step = 16 * 4;
+      let samplesCount = 0;
+      for (let i = 0; i < sample.length; i += step) {
+        // Rec. 601 luma formula
+        totalBrightness += (0.299 * sample[i] + 0.587 * sample[i + 1] + 0.114 * sample[i + 2]);
+        samplesCount++;
       }
+      const avgBrightness = totalBrightness / (samplesCount || 1);
 
-      if (opencvResult && typeof opencvResult.isPresent === 'boolean') {
+      if (avgBrightness < 8.0) {
         return {
-          cameraActive: opencvResult.cameraActive ?? true,
-          isPresent: opencvResult.isPresent,
-          reason: opencvResult.reason,
-          method: opencvResult.method || 'opencv',
-          faceDetected: opencvResult.faceDetected,
-          facesCount: opencvResult.facesCount,
+          cameraActive: false,
+          isPresent: false,
+          reason: 'Camera is covered or completely dark',
+          method: 'client-dark'
         };
       }
-    } catch (cvErr) {
-      console.warn('OpenCV face detection call failed:', cvErr);
+    } catch {}
+
+    const base64Image = sharedCanvas.toDataURL('image/jpeg', 0.82);
+    if (!base64Image) {
+      return {
+        cameraActive: true,
+        isPresent: false,
+        reason: 'Failed to capture frame',
+        method: 'no-frame'
+      };
     }
+
+    let opencvResult: any = null;
+
+    if ((window as any).electronAPI?.detectPresenceWithOpenCV) {
+      opencvResult = await (window as any).electronAPI.detectPresenceWithOpenCV(base64Image);
+    } else {
+      const res = await fetch('/api/opencv/detect-presence', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: base64Image }),
+      });
+      if (res.ok) {
+        opencvResult = await res.json();
+      }
+    }
+
+    if (opencvResult && typeof opencvResult.isPresent === 'boolean') {
+      return {
+        cameraActive: opencvResult.cameraActive ?? true,
+        isPresent: opencvResult.isPresent,
+        reason: opencvResult.reason,
+        method: opencvResult.method || 'opencv',
+        faceDetected: opencvResult.faceDetected,
+        facesCount: opencvResult.facesCount,
+      };
+    }
+  } catch (cvErr) {
+    console.warn('Face detection error:', cvErr);
+  } finally {
+    isCheckInProgress = false;
   }
 
   return {

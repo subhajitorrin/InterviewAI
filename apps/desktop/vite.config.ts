@@ -157,45 +157,149 @@ export default defineConfig({
           }
         });
 
+        // Persistent Python Presence Daemon for real-time presence detection in Vite dev server
+        let vitePresenceProc: any = null;
+        let vitePendingQueue: Array<{ resolve: (val: any) => void; timer: any }> = [];
+        let viteBuffer = '';
+
+        const getViteRepoRoot = () => {
+          let curr = __dirname;
+          for (let i = 0; i < 5; i++) {
+            if (path.resolve(curr, 'apps/agent/presence_detector.py')) {
+              try {
+                const fs = require('fs');
+                if (fs.existsSync(path.join(curr, 'apps/agent/presence_detector.py'))) {
+                  return curr;
+                }
+              } catch {}
+            }
+            const parent = path.dirname(curr);
+            if (parent === curr) break;
+            curr = parent;
+          }
+          return path.resolve(__dirname, '../../');
+        };
+
+        const startVitePresenceDaemon = async () => {
+          if (vitePresenceProc) return;
+          try {
+            const { spawn } = await import('child_process');
+            const fs = await import('fs');
+            const rootDir = getViteRepoRoot();
+            const pythonBin = path.join(rootDir, 'apps/agent/.venv/bin/python');
+            const scriptPath = path.join(rootDir, 'apps/agent/presence_detector.py');
+
+            if (!fs.existsSync(pythonBin) || !fs.existsSync(scriptPath)) {
+              return;
+            }
+
+            vitePresenceProc = spawn(pythonBin, [scriptPath, '--daemon'], {
+              stdio: ['pipe', 'pipe', 'pipe'],
+            });
+
+            vitePresenceProc.stdout.on('data', (chunk: Buffer) => {
+              viteBuffer += chunk.toString();
+              const lines = viteBuffer.split('\n');
+              viteBuffer = lines.pop() || '';
+              for (const line of lines) {
+                const trimmed = line.trim();
+                if (!trimmed) continue;
+                const req = vitePendingQueue.shift();
+                if (req) {
+                  clearTimeout(req.timer);
+                  try {
+                    req.resolve(JSON.parse(trimmed));
+                  } catch {
+                    req.resolve({ cameraActive: true, isPresent: false, reason: 'Parse error' });
+                  }
+                }
+              }
+            });
+
+            vitePresenceProc.on('error', () => {
+              if (vitePresenceProc) {
+                try { vitePresenceProc.kill(); } catch {}
+                vitePresenceProc = null;
+              }
+            });
+
+            vitePresenceProc.on('close', () => {
+              vitePresenceProc = null;
+              while (vitePendingQueue.length > 0) {
+                const req = vitePendingQueue.shift();
+                if (req) {
+                  clearTimeout(req.timer);
+                  req.resolve({ cameraActive: true, isPresent: false, method: 'daemon-closed' });
+                }
+              }
+            });
+          } catch {}
+        };
+
+        const detectVitePresence = async (imageBase64: string): Promise<any> => {
+          await startVitePresenceDaemon();
+          if (!vitePresenceProc || !vitePresenceProc.stdin || vitePresenceProc.killed) {
+            // One-shot fallback
+            const { spawn } = await import('child_process');
+            const rootDir = getViteRepoRoot();
+            const pythonBin = path.join(rootDir, 'apps/agent/.venv/bin/python');
+            const scriptPath = path.join(rootDir, 'apps/agent/presence_detector.py');
+            return new Promise((resolve) => {
+              try {
+                const proc = spawn(pythonBin, [scriptPath]);
+                let output = '';
+                let errOutput = '';
+                proc.stdout.on('data', (d: Buffer) => { output += d.toString(); });
+                proc.stderr.on('data', (d: Buffer) => { errOutput += d.toString(); });
+                proc.on('error', (err: any) => resolve({ cameraActive: true, isPresent: false, error: err.message }));
+                proc.on('close', (code: number) => {
+                  if (code === 0 && output.trim()) {
+                    try { resolve(JSON.parse(output.trim())); return; } catch {}
+                  }
+                  resolve({ cameraActive: true, isPresent: false, error: errOutput });
+                });
+                proc.stdin.write(imageBase64 || '');
+                proc.stdin.end();
+              } catch (e: any) {
+                resolve({ cameraActive: true, isPresent: false, error: e.message });
+              }
+            });
+          }
+
+          return new Promise((resolve) => {
+            const timer = setTimeout(() => {
+              const idx = vitePendingQueue.findIndex(q => q.resolve === resolve);
+              if (idx !== -1) vitePendingQueue.splice(idx, 1);
+              resolve({ cameraActive: true, isPresent: false, timeout: true });
+            }, 1500);
+
+            vitePendingQueue.push({ resolve, timer });
+
+            try {
+              const clean = (imageBase64 || '').replace(/[\r\n]+/g, '');
+              vitePresenceProc.stdin.write(clean + '\n');
+            } catch {
+              clearTimeout(timer);
+              if (vitePresenceProc) {
+                try { vitePresenceProc.kill(); } catch {}
+                vitePresenceProc = null;
+              }
+              resolve({ cameraActive: true, isPresent: false });
+            }
+          });
+        };
+
         server.middlewares.use('/api/opencv/detect-presence', async (req, res) => {
           if (req.method === 'POST') {
             let body = '';
             req.on('data', (chunk) => { body += chunk; });
             req.on('end', async () => {
               try {
-                const { spawn } = await import('child_process');
                 const parsed = JSON.parse(body || '{}');
                 const imageBase64 = parsed.image || '';
-
-                const rootDir = path.resolve(__dirname, '../../');
-                const pythonBin = path.join(rootDir, 'apps/agent/.venv/bin/python');
-                const scriptPath = path.join(rootDir, 'apps/agent/presence_detector.py');
-
-                const proc = spawn(pythonBin, [scriptPath]);
-                let output = '';
-                let errOutput = '';
-
-                proc.stdout.on('data', (d) => { output += d.toString(); });
-                proc.stderr.on('data', (d) => { errOutput += d.toString(); });
-
-                proc.on('close', (code) => {
-                  res.setHeader('Content-Type', 'application/json');
-                  if (code === 0 && output.trim()) {
-                    try {
-                      res.end(output.trim());
-                      return;
-                    } catch {}
-                  }
-                  res.end(JSON.stringify({
-                    cameraActive: true,
-                    isPresent: false,
-                    error: errOutput || `OpenCV exit code ${code}`,
-                    method: 'opencv-fallback'
-                  }));
-                });
-
-                proc.stdin.write(imageBase64);
-                proc.stdin.end();
+                const result = await detectVitePresence(imageBase64);
+                res.setHeader('Content-Type', 'application/json');
+                res.end(JSON.stringify(result));
               } catch (err: any) {
                 res.statusCode = 500;
                 res.end(JSON.stringify({ error: err.message, cameraActive: true, isPresent: false }));

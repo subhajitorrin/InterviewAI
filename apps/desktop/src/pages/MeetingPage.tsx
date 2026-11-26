@@ -43,6 +43,7 @@ export const MeetingPage: React.FC = () => {
   >('greeting');
   const [activeWarningApp, setActiveWarningApp] = useState<string | null>(null);
   const [isFaceDetected, setIsFaceDetected] = useState<boolean | null>(null);
+  const [isAbsenceWarningActive, setIsAbsenceWarningActive] = useState<boolean>(false);
 
   // Live OpenAI cost & latency metrics
   const [openAiMetrics, setOpenAiMetrics] = useState<{
@@ -64,7 +65,9 @@ export const MeetingPage: React.FC = () => {
   const hasStartedFlowRef = useRef<boolean>(false);
   const livekitConnectedRef = useRef<boolean>(false);
   const sendDataRef = useRef<(data: any) => Promise<void>>(() => Promise.resolve());
-  const hasWarnedAbsenceRef = useRef<boolean>(false);
+  const isFaceDetectedRef = useRef<boolean>(false);
+  const absentStartTimeRef = useRef<number | null>(null);
+  const lastAbsenceWarningTimeRef = useRef<number>(0);
   const userSpeechEndTimeRef = useRef<number>(0);
   const wasUserSpeakingRef = useRef<boolean>(false);
 
@@ -117,22 +120,22 @@ export const MeetingPage: React.FC = () => {
       }
 
       // When AI initiates webcam test step, run OpenCV face presence detection
-      // Retries after 1.5s to ensure webcam stream has fully attached its first valid frame
       if (data.step === 'webcam_test') {
         setTimeout(async () => {
           try {
             const presence = await detectCandidatePresence(videoRef.current);
-            setIsFaceDetected(presence.isPresent && presence.cameraActive);
-            // If candidate is missing or camera muted during the webcam test step, report result
-            if (!presence.isPresent || !presence.cameraActive) {
+            const present = Boolean(presence.isPresent && presence.cameraActive);
+            setIsFaceDetected(present);
+            isFaceDetectedRef.current = present;
+            if (!present) {
               sendDataRef.current({ type: 'presence_result', isPresent: false, reason: presence.reason });
             } else {
               sendDataRef.current({ type: 'presence_result', isPresent: true });
             }
           } catch (e) {
-            console.warn('OpenCV verification error:', e);
+            console.warn('Webcam test verification error:', e);
           }
-        }, 1800);
+        }, 1200);
       }
     }
   }, []);
@@ -380,45 +383,79 @@ export const MeetingPage: React.FC = () => {
     return () => clearInterval(interval);
   }, [currentStep, activeWarningApp, sendData]);
 
-  // Periodic OpenCV presence monitor during active interview
-  // Checks every 2.5 seconds. If candidate is absent for > 5 seconds (2 consecutive checks), trigger verbal warning.
+  // Real-Time Camera Presence Monitor
+  // Runs continuously every 300ms as long as the chamber is open and camera is active.
+  // Instantly updates "In Frame" vs "Out of Frame" in real-time.
+  // If candidate is absent from frame for >= 5 seconds (5000ms), triggers verbal AI warning.
   useEffect(() => {
-    if (currentStep !== 'in_progress') return;
-
-    let absenceCount = 0;
+    let isCancelled = false;
 
     const interval = setInterval(async () => {
+      if (isCancelled) return;
+
       if (useInterviewStore.getState().isVideoMuted) {
         setIsFaceDetected(false);
+        isFaceDetectedRef.current = false;
+        setIsAbsenceWarningActive(false);
+        absentStartTimeRef.current = null;
         return;
       }
+
       try {
         const presence = await detectCandidatePresence(videoRef.current);
+        if (isCancelled) return;
+
         const present = Boolean(presence.isPresent && presence.cameraActive);
         setIsFaceDetected(present);
+        isFaceDetectedRef.current = present;
 
-        if (!present && presence.cameraActive) {
-          absenceCount += 1;
-          // After 2 consecutive checks (> 5 seconds absent from frame), trigger warning
-          if (absenceCount >= 2 && !hasWarnedAbsenceRef.current) {
-            hasWarnedAbsenceRef.current = true;
-            if (livekitConnectedRef.current) {
-              sendDataRef.current({ type: 'presence_result', isPresent: false });
-            } else {
-              speakSpeechFallback("You aren't visible in front of the camera. Please make sure you are in frame.");
+        const now = Date.now();
+
+        if (present) {
+          // Candidate is in front of the camera
+          absentStartTimeRef.current = null;
+          setIsAbsenceWarningActive(false);
+        } else {
+          // Candidate is absent / out of frame
+          if (absentStartTimeRef.current === null) {
+            absentStartTimeRef.current = now;
+          }
+
+          const absentElapsed = now - absentStartTimeRef.current;
+
+          // If absent for >= 5 seconds, trigger AI warning
+          if (absentElapsed >= 5000) {
+            setIsAbsenceWarningActive(true);
+
+            // Cooldown of 12 seconds between verbal warnings so it doesn't spam
+            if (now - lastAbsenceWarningTimeRef.current > 12000) {
+              lastAbsenceWarningTimeRef.current = now;
+              const warnPresence = "You aren't visible in front of the camera. Please make sure you are in frame.";
+              appendConversationLog('SYSTEM ALERT', 'Candidate out of frame for >5 seconds');
+              appendConversationLog('AI (Sarah Mitchell)', warnPresence);
+
+              if (livekitConnectedRef.current) {
+                sendDataRef.current({
+                  type: 'presence_result',
+                  isPresent: false,
+                  reason: 'Candidate out of frame for >5 seconds',
+                });
+              } else {
+                speakSpeechFallback(warnPresence);
+              }
             }
           }
-        } else if (present) {
-          absenceCount = 0;
-          hasWarnedAbsenceRef.current = false;
         }
       } catch (err) {
-        console.warn('Periodic OpenCV check error:', err);
+        console.warn('Real-time presence detection error:', err);
       }
-    }, 2500);
+    }, 300);
 
-    return () => clearInterval(interval);
-  }, [currentStep]);
+    return () => {
+      isCancelled = true;
+      clearInterval(interval);
+    };
+  }, []);
 
   return (
     <div className="h-screen w-screen bg-[#111317] text-white flex flex-col justify-between p-6 select-none overflow-hidden relative">
@@ -436,6 +473,14 @@ export const MeetingPage: React.FC = () => {
         <div className="absolute top-5 left-1/2 -translate-x-1/2 z-50 bg-rose-600/95 text-white px-5 py-2.5 rounded-2xl shadow-2xl border border-rose-400 flex items-center gap-2.5 text-xs font-semibold backdrop-blur-md animate-bounce">
           <AlertTriangle className="w-4 h-4 shrink-0 text-white" />
           <span>Warning: You have opened <strong>{activeWarningApp}</strong>. Please keep external applications closed.</span>
+        </div>
+      )}
+
+      {/* Real-Time Floating Warning Banner if candidate is out of camera frame for >5 seconds */}
+      {!activeWarningApp && isAbsenceWarningActive && (
+        <div className="absolute top-5 left-1/2 -translate-x-1/2 z-50 bg-rose-600/95 text-white px-5 py-2.5 rounded-2xl shadow-2xl border border-rose-400 flex items-center gap-2.5 text-xs font-semibold backdrop-blur-md animate-pulse">
+          <AlertTriangle className="w-4 h-4 shrink-0 text-white" />
+          <span>Warning: You aren't visible in front of the camera. Please return to frame.</span>
         </div>
       )}
 
