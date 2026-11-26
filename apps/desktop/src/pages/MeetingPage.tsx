@@ -17,9 +17,7 @@ import {
   Video, 
   VideoOff, 
   PhoneOff,
-  AlertTriangle,
-  Zap,
-  DollarSign
+  AlertTriangle
 } from 'lucide-react';
 
 export const MeetingPage: React.FC = () => {
@@ -425,56 +423,12 @@ export const MeetingPage: React.FC = () => {
   return (
     <div className="h-screen w-screen bg-[#111317] text-white flex flex-col justify-between p-6 select-none overflow-hidden relative">
       
-      {/* Real-Time OpenAI Live Cost & Latency HUD (Top-Left Corner) */}
-      <div className="absolute top-5 left-6 z-40 flex items-center gap-3.5 bg-[#14171F]/90 backdrop-blur-md border border-neutral-800/90 rounded-2xl px-4 py-2.5 shadow-2xl shadow-black/50 select-none transition-all">
-        {/* Model & Live Status indicator */}
-        <div className="flex items-center gap-2 pr-3.5 border-r border-neutral-800/80">
-          <span className="relative flex h-2 w-2">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-          </span>
-          <div className="flex flex-col">
-            <span className="text-[9px] uppercase tracking-wider font-semibold text-neutral-400">
-              OpenAI Live
-            </span>
-            <span className="text-[11px] font-mono font-medium text-neutral-300">
-              {openAiMetrics.model}
-            </span>
-          </div>
-        </div>
-
-        {/* Live Cost */}
-        <div className="flex flex-col pr-3.5 border-r border-neutral-800/80">
-          <span className="text-[9px] uppercase tracking-wider font-semibold text-neutral-400 flex items-center gap-1">
-            <DollarSign className="w-2.5 h-2.5 text-emerald-400" />
-            Cost
-          </span>
-          <span className="text-[13px] font-mono font-bold text-emerald-400 tracking-tight">
-            {openAiMetrics.costFormatted || `$${openAiMetrics.cost.toFixed(4)}`}
-          </span>
-        </div>
-
-        {/* Turnaround Response Time (time from speech end to AI response) */}
-        <div className="flex flex-col">
-          <span className="text-[9px] uppercase tracking-wider font-semibold text-neutral-400 flex items-center gap-1">
-            <Zap className="w-2.5 h-2.5 text-amber-400" />
-            Response Time
-          </span>
-          <span
-            className={`text-[13px] font-mono font-bold tracking-tight ${
-              openAiMetrics.latencyMs === 0
-                ? 'text-neutral-400'
-                : openAiMetrics.latencyMs < 600
-                ? 'text-emerald-400'
-                : openAiMetrics.latencyMs < 1000
-                ? 'text-amber-400'
-                : 'text-rose-400'
-            }`}
-            title="Turnaround time from when you stop speaking to when AI responds"
-          >
-            {openAiMetrics.latencyMs > 0 ? `${openAiMetrics.latencyMs} ms` : 'Ready'}
-          </span>
-        </div>
+      {/* Simple Live Cost Badge (Top-Left Corner) */}
+      <div className="absolute top-5 left-6 z-40 bg-black/70 backdrop-blur-md border border-neutral-800 px-3.5 py-1.5 rounded-xl flex items-center gap-2 shadow-lg">
+        <span className="text-xs text-neutral-400 font-medium">Cost:</span>
+        <span className="text-sm font-mono font-bold text-white">
+          {openAiMetrics.costFormatted || `$${openAiMetrics.cost.toFixed(4)}`}
+        </span>
       </div>
 
       {/* Real-Time Floating Warning Banner if an external application is opened */}
