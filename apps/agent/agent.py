@@ -163,7 +163,11 @@ async def entrypoint(ctx: JobContext):
             elif payload.get("type") == "presence_result":
                 is_present = payload.get("isPresent", True)
                 reason = payload.get("reason", "Face or person not detected on webcam")
-                if not is_present:
+                now = asyncio.get_event_loop().time()
+                # Cooldown of 12 seconds between warnings so it reliably triggers when away for >5s without continuous rapid spam
+                last_warn = getattr(on_data_received, "_last_presence_warn", 0)
+                if not is_present and (now - last_warn > 12):
+                    on_data_received._last_presence_warn = now
                     warn_presence = "You aren't visible in front of the camera. Please make sure you are in frame."
                     logger.warning(f"⚠️ OpenCV presence alert: {reason}")
                     append_conversation_log("SYSTEM ALERT", f"OpenCV camera check: {reason}")

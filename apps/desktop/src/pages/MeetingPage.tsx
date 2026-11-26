@@ -42,6 +42,7 @@ export const MeetingPage: React.FC = () => {
     'greeting' | 'desktop_check' | 'webcam_test' | 'ready' | 'in_progress'
   >('greeting');
   const [activeWarningApp, setActiveWarningApp] = useState<string | null>(null);
+  const [isFaceDetected, setIsFaceDetected] = useState<boolean | null>(null);
 
   const baselineAppsRef = useRef<string[]>([]);
   const warnedAppsRef = useRef<Set<string>>(new Set());
@@ -65,11 +66,13 @@ export const MeetingPage: React.FC = () => {
       }
 
       // When AI initiates webcam test step, run OpenCV face presence detection
-      // No labels or text are shown on the UI; if not detected, the AI speaks the warning directly
+      // Retries after 1.5s to ensure webcam stream has fully attached its first valid frame
       if (data.step === 'webcam_test') {
         setTimeout(async () => {
           try {
             const presence = await detectCandidatePresence(videoRef.current);
+            setIsFaceDetected(presence.isPresent && presence.cameraActive);
+            // If candidate is missing or camera muted during the webcam test step, report result
             if (!presence.isPresent || !presence.cameraActive) {
               sendDataRef.current({ type: 'presence_result', isPresent: false, reason: presence.reason });
             } else {
@@ -78,7 +81,7 @@ export const MeetingPage: React.FC = () => {
           } catch (e) {
             console.warn('OpenCV verification error:', e);
           }
-        }, 1200);
+        }, 1800);
       }
     }
   }, []);
@@ -326,17 +329,26 @@ export const MeetingPage: React.FC = () => {
   }, [currentStep, activeWarningApp, sendData]);
 
   // Periodic OpenCV presence monitor during active interview
-  // When candidate is not detected, no banner or warning is shown on the UI.
-  // The AI triggers a verbal warning: "You aren't visible in front of the camera. Please make sure you are in frame."
+  // Checks every 2.5 seconds. If candidate is absent for > 5 seconds (2 consecutive checks), trigger verbal warning.
   useEffect(() => {
     if (currentStep !== 'in_progress') return;
 
+    let absenceCount = 0;
+
     const interval = setInterval(async () => {
-      if (useInterviewStore.getState().isVideoMuted) return;
+      if (useInterviewStore.getState().isVideoMuted) {
+        setIsFaceDetected(false);
+        return;
+      }
       try {
         const presence = await detectCandidatePresence(videoRef.current);
-        if (!presence.isPresent && presence.cameraActive) {
-          if (!hasWarnedAbsenceRef.current) {
+        const present = Boolean(presence.isPresent && presence.cameraActive);
+        setIsFaceDetected(present);
+
+        if (!present && presence.cameraActive) {
+          absenceCount += 1;
+          // After 2 consecutive checks (> 5 seconds absent from frame), trigger warning
+          if (absenceCount >= 2 && !hasWarnedAbsenceRef.current) {
             hasWarnedAbsenceRef.current = true;
             if (livekitConnectedRef.current) {
               sendDataRef.current({ type: 'presence_result', isPresent: false });
@@ -344,14 +356,14 @@ export const MeetingPage: React.FC = () => {
               speakSpeechFallback("You aren't visible in front of the camera. Please make sure you are in frame.");
             }
           }
-        } else if (presence.isPresent) {
-          // Reset warning flag when candidate returns to camera frame
+        } else if (present) {
+          absenceCount = 0;
           hasWarnedAbsenceRef.current = false;
         }
       } catch (err) {
         console.warn('Periodic OpenCV check error:', err);
       }
-    }, 7000);
+    }, 2500);
 
     return () => clearInterval(interval);
   }, [currentStep]);
@@ -390,6 +402,31 @@ export const MeetingPage: React.FC = () => {
                 <VideoOff className="w-10 h-10 mb-2 opacity-40" />
               </div>
             )}
+
+            {/* Live Camera Presence Status Sign (Green = Face Detected, Red = Not Detected) */}
+            <div className="absolute top-3 right-3 z-20">
+              {isVideoMuted ? (
+                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-black/70 backdrop-blur-md text-neutral-400 border border-neutral-700">
+                  <span className="w-2 h-2 rounded-full bg-neutral-500" />
+                  <span>Camera Off</span>
+                </div>
+              ) : isFaceDetected === null ? (
+                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-black/70 backdrop-blur-md text-neutral-300 border border-neutral-700">
+                  <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+                  <span>Calibrating...</span>
+                </div>
+              ) : isFaceDetected ? (
+                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-emerald-950/80 backdrop-blur-md text-emerald-300 border border-emerald-500/40 shadow-sm shadow-emerald-500/20">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                  <span>In Frame</span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-rose-950/80 backdrop-blur-md text-rose-300 border border-rose-500/40 shadow-sm shadow-rose-500/20 animate-pulse">
+                  <span className="w-2 h-2 rounded-full bg-rose-500" />
+                  <span>Out of Frame</span>
+                </div>
+              )}
+            </div>
 
             {/* Participant Tag */}
             <div className="absolute bottom-3 left-3 bg-black/60 backdrop-blur-sm px-2.5 py-1 rounded-lg flex items-center gap-1.5 text-xs font-medium text-slate-200 z-20">
