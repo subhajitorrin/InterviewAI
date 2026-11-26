@@ -58,6 +58,8 @@ export const MeetingPage: React.FC = () => {
   // Stable handler for data messages received from LiveKit agent
   const handleDataReceived = useCallback((data: any) => {
     if (data?.type === 'step') {
+      // Mark flow as started so client-side fallback does not also speak
+      hasStartedFlowRef.current = true;
       if (data.step) {
         setCurrentStep(data.step);
       }
@@ -96,6 +98,9 @@ export const MeetingPage: React.FC = () => {
 
   useEffect(() => {
     livekitConnectedRef.current = isConnected;
+    if (isConnected) {
+      hasStartedFlowRef.current = true;
+    }
   }, [isConnected]);
 
   // Connect once on mount after fetching active apps, disconnect on unmount

@@ -7,7 +7,7 @@ export const App: React.FC = () => {
   const { currentPage } = useInterviewStore();
 
   return (
-    <div className="h-screen w-screen bg-[#0E1117] overflow-hidden">
+    <div className="h-screen w-screen bg-black overflow-hidden">
       {currentPage === 'setup' ? <SetupPage /> : <MeetingPage />}
     </div>
   );
