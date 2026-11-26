@@ -384,7 +384,7 @@ export const MeetingPage: React.FC = () => {
         <div className="w-full grid grid-cols-1 md:grid-cols-2 gap-5 items-center">
           
           {/* LEFT: MY WEBCAM */}
-          <div className="relative w-full aspect-video bg-[#1C1F26] rounded-2xl overflow-hidden shadow-2xl flex items-center justify-center border border-slate-800/80">
+          <div className="relative w-full aspect-video bg-black rounded-2xl overflow-hidden shadow-2xl flex items-center justify-center border border-neutral-800">
             {/* Always keep video element in DOM so ref and srcObject attach immediately */}
             <video
               ref={videoRef}
@@ -398,7 +398,7 @@ export const MeetingPage: React.FC = () => {
 
             {/* Video Muted or Fallback Placeholder */}
             {isVideoMuted && (
-              <div className="flex flex-col items-center justify-center text-slate-500">
+              <div className="flex flex-col items-center justify-center text-neutral-500">
                 <VideoOff className="w-10 h-10 mb-2 opacity-40" />
               </div>
             )}
@@ -429,27 +429,27 @@ export const MeetingPage: React.FC = () => {
             </div>
 
             {/* Participant Tag */}
-            <div className="absolute bottom-3 left-3 bg-black/60 backdrop-blur-sm px-2.5 py-1 rounded-lg flex items-center gap-1.5 text-xs font-medium text-slate-200 z-20">
+            <div className="absolute bottom-3 left-3 bg-black/70 backdrop-blur-md border border-neutral-800 px-2.5 py-1 rounded-lg flex items-center gap-1.5 text-xs font-medium text-neutral-300 z-20">
               {isMicMuted ? (
                 <MicOff className="w-3.5 h-3.5 text-rose-400" />
               ) : (
-                <Mic className="w-3.5 h-3.5 text-slate-300" />
+                <Mic className="w-3.5 h-3.5 text-neutral-400" />
               )}
               <span>{candidateName || 'You'}</span>
             </div>
           </div>
 
           {/* RIGHT: AI INTERVIEWER */}
-          <div className="relative w-full aspect-video bg-[#1C1F26] rounded-2xl overflow-hidden shadow-2xl flex items-center justify-center border border-slate-800/80">
+          <div className="relative w-full aspect-video bg-black rounded-2xl overflow-hidden shadow-2xl flex items-center justify-center border border-neutral-800">
             <AiVisualizer
               isAiSpeaking={isAiSpeaking}
               audioLevel={aiAudioLevel}
             />
 
             {/* Participant Tag */}
-            <div className="absolute bottom-3 left-3 bg-black/60 backdrop-blur-sm px-2.5 py-1 rounded-lg flex items-center gap-1.5 text-xs font-medium text-slate-200 z-20">
-              <span className={`w-2 h-2 rounded-full ${isAiSpeaking ? 'bg-cyan-400 animate-pulse' : 'bg-slate-500'}`} />
-              <span>AI Interviewer (Sarah)</span>
+            <div className="absolute bottom-3 left-3 bg-black/70 backdrop-blur-md border border-neutral-800 px-2.5 py-1 rounded-lg flex items-center gap-1.5 text-xs font-medium text-neutral-300 z-20">
+              <span className={`w-2 h-2 rounded-full ${isAiSpeaking ? 'bg-white animate-pulse' : 'bg-neutral-600'}`} />
+              <span>Interviewer (Sarah)</span>
             </div>
           </div>
 

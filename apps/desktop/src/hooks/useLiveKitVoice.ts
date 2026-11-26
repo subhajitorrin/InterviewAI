@@ -198,8 +198,8 @@ export function useLiveKitVoice({
 
               const source = audioCtx.createMediaStreamSource(new MediaStream([track.mediaStreamTrack]));
               const analyser = audioCtx.createAnalyser();
-              analyser.fftSize = 64;
-              analyser.smoothingTimeConstant = 0.75;
+              analyser.fftSize = 128;
+              analyser.smoothingTimeConstant = 0.4;
               source.connect(analyser);
 
               const bufferLength = analyser.frequencyBinCount;
@@ -211,14 +211,16 @@ export function useLiveKitVoice({
                 }
 
                 analyser.getByteFrequencyData(dataArray);
-                let sum = 0;
-                for (let i = 0; i < bufferLength; i++) {
-                  sum += dataArray[i];
+                // Calculate RMS energy across human vocal frequencies (approx 85Hz - 3400Hz)
+                let energy = 0;
+                const vocalBins = Math.min(bufferLength, 32);
+                for (let i = 1; i < vocalBins; i++) {
+                  energy += (dataArray[i] / 255) ** 2;
                 }
-                const average = sum / bufferLength;
-                // Normalize 0..1 (boost sensitivity for voice frequencies)
-                const normalized = Math.min(1, Math.pow(average / 90, 1.2));
-                setAiAudioLevel(normalized);
+                const rms = Math.sqrt(energy / (vocalBins - 1));
+                // Responsive dynamic scaling for subtle vocal inflections and tone dynamics
+                const scaled = Math.min(1, Math.max(0, rms * 1.85));
+                setAiAudioLevel(scaled);
 
                 animationFrameRef.current = requestAnimationFrame(checkAudioLevel);
               };
