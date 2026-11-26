@@ -17,7 +17,9 @@ import {
   Video, 
   VideoOff, 
   PhoneOff,
-  AlertTriangle
+  AlertTriangle,
+  Zap,
+  DollarSign
 } from 'lucide-react';
 
 export const MeetingPage: React.FC = () => {
@@ -44,25 +46,76 @@ export const MeetingPage: React.FC = () => {
   const [activeWarningApp, setActiveWarningApp] = useState<string | null>(null);
   const [isFaceDetected, setIsFaceDetected] = useState<boolean | null>(null);
 
+  // Live OpenAI cost & latency metrics
+  const [openAiMetrics, setOpenAiMetrics] = useState<{
+    cost: number;
+    costFormatted: string;
+    latencyMs: number;
+    totalTokens: number;
+    model: string;
+  }>({
+    cost: 0.0,
+    costFormatted: '$0.0000',
+    latencyMs: 0,
+    totalTokens: 0,
+    model: 'gpt-4o-mini',
+  });
+
   const baselineAppsRef = useRef<string[]>([]);
   const warnedAppsRef = useRef<Set<string>>(new Set());
   const hasStartedFlowRef = useRef<boolean>(false);
   const livekitConnectedRef = useRef<boolean>(false);
   const sendDataRef = useRef<(data: any) => Promise<void>>(() => Promise.resolve());
   const hasWarnedAbsenceRef = useRef<boolean>(false);
+  const userSpeechEndTimeRef = useRef<number>(0);
+  const wasUserSpeakingRef = useRef<boolean>(false);
 
-  // Stable handler for speaking changes
+  // Stable handler for speaking changes and live voice turnaround latency
   const handleAiSpeakingChange = useCallback((speaking: boolean) => {
     useInterviewStore.getState().setAiSpeaking(speaking);
+
+    // When AI starts speaking in response to candidate, compute voice turnaround time
+    if (speaking && userSpeechEndTimeRef.current > 0) {
+      const turnaroundMs = Math.round(performance.now() - userSpeechEndTimeRef.current);
+      userSpeechEndTimeRef.current = 0;
+      if (turnaroundMs > 80 && turnaroundMs < 12000) {
+        setOpenAiMetrics((prev) => ({
+          ...prev,
+          latencyMs: turnaroundMs,
+        }));
+      }
+    }
+  }, []);
+
+  const handleUserSpeakingChange = useCallback((speaking: boolean) => {
+    if (wasUserSpeakingRef.current && !speaking) {
+      // User just finished speaking!
+      userSpeechEndTimeRef.current = performance.now();
+    }
+    wasUserSpeakingRef.current = speaking;
   }, []);
 
   // Stable handler for data messages received from LiveKit agent
   const handleDataReceived = useCallback((data: any) => {
+    if (data?.type === 'openai_metrics') {
+      setOpenAiMetrics({
+        cost: data.cost ?? 0,
+        costFormatted: data.costFormatted || `$${(data.cost || 0).toFixed(4)}`,
+        latencyMs: data.latencyMs ?? 0,
+        totalTokens: data.totalTokens ?? 0,
+        model: data.model || 'gpt-4o-mini',
+      });
+      return;
+    }
+
     if (data?.type === 'step') {
       // Mark flow as started so client-side fallback does not also speak
       hasStartedFlowRef.current = true;
       if (data.step) {
         setCurrentStep(data.step);
+      }
+      if (typeof data.phaseIndex === 'number') {
+        useInterviewStore.getState().setCurrentPhaseIndex(data.phaseIndex);
       }
 
       // When AI initiates webcam test step, run OpenCV face presence detection
@@ -92,6 +145,7 @@ export const MeetingPage: React.FC = () => {
     participantName: candidateName || 'Candidate',
     isMicMuted,
     onAiSpeakingChange: handleAiSpeakingChange,
+    onUserSpeakingChange: handleUserSpeakingChange,
     onDataReceived: handleDataReceived,
   });
 
@@ -273,7 +327,7 @@ export const MeetingPage: React.FC = () => {
 
         // --- STEP 4: ALL GOOD, LET'S START ---
         setCurrentStep('ready');
-        const startSpeech = `All good! Let's start with the interview. To kick things off, tell me about your background and a challenging technical project you recently worked on.`;
+        const startSpeech = `All good, everything is set up. Let's get started with the interview! To kick things off, could you give me a short introduction about yourself, your background, and what you've been working on recently?`;
         await speakSafe(startSpeech);
         await new Promise((r) => setTimeout(r, 300));
 
@@ -371,6 +425,58 @@ export const MeetingPage: React.FC = () => {
   return (
     <div className="h-screen w-screen bg-[#111317] text-white flex flex-col justify-between p-6 select-none overflow-hidden relative">
       
+      {/* Real-Time OpenAI Live Cost & Latency HUD (Top-Left Corner) */}
+      <div className="absolute top-5 left-6 z-40 flex items-center gap-3.5 bg-[#14171F]/90 backdrop-blur-md border border-neutral-800/90 rounded-2xl px-4 py-2.5 shadow-2xl shadow-black/50 select-none transition-all">
+        {/* Model & Live Status indicator */}
+        <div className="flex items-center gap-2 pr-3.5 border-r border-neutral-800/80">
+          <span className="relative flex h-2 w-2">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+          </span>
+          <div className="flex flex-col">
+            <span className="text-[9px] uppercase tracking-wider font-semibold text-neutral-400">
+              OpenAI Live
+            </span>
+            <span className="text-[11px] font-mono font-medium text-neutral-300">
+              {openAiMetrics.model}
+            </span>
+          </div>
+        </div>
+
+        {/* Live Cost */}
+        <div className="flex flex-col pr-3.5 border-r border-neutral-800/80">
+          <span className="text-[9px] uppercase tracking-wider font-semibold text-neutral-400 flex items-center gap-1">
+            <DollarSign className="w-2.5 h-2.5 text-emerald-400" />
+            Cost
+          </span>
+          <span className="text-[13px] font-mono font-bold text-emerald-400 tracking-tight">
+            {openAiMetrics.costFormatted || `$${openAiMetrics.cost.toFixed(4)}`}
+          </span>
+        </div>
+
+        {/* Turnaround Response Time (time from speech end to AI response) */}
+        <div className="flex flex-col">
+          <span className="text-[9px] uppercase tracking-wider font-semibold text-neutral-400 flex items-center gap-1">
+            <Zap className="w-2.5 h-2.5 text-amber-400" />
+            Response Time
+          </span>
+          <span
+            className={`text-[13px] font-mono font-bold tracking-tight ${
+              openAiMetrics.latencyMs === 0
+                ? 'text-neutral-400'
+                : openAiMetrics.latencyMs < 600
+                ? 'text-emerald-400'
+                : openAiMetrics.latencyMs < 1000
+                ? 'text-amber-400'
+                : 'text-rose-400'
+            }`}
+            title="Turnaround time from when you stop speaking to when AI responds"
+          >
+            {openAiMetrics.latencyMs > 0 ? `${openAiMetrics.latencyMs} ms` : 'Ready'}
+          </span>
+        </div>
+      </div>
+
       {/* Real-Time Floating Warning Banner if an external application is opened */}
       {activeWarningApp && (
         <div className="absolute top-5 left-1/2 -translate-x-1/2 z-50 bg-rose-600/95 text-white px-5 py-2.5 rounded-2xl shadow-2xl border border-rose-400 flex items-center gap-2.5 text-xs font-semibold backdrop-blur-md animate-bounce">

@@ -9,6 +9,7 @@ export interface UseLiveKitVoiceOptions {
   onConnected?: () => void;
   onDisconnected?: () => void;
   onAiSpeakingChange?: (isSpeaking: boolean) => void;
+  onUserSpeakingChange?: (isSpeaking: boolean) => void;
   onDataReceived?: (data: any) => void;
 }
 
@@ -20,6 +21,7 @@ export function useLiveKitVoice({
   onConnected,
   onDisconnected,
   onAiSpeakingChange,
+  onUserSpeakingChange,
   onDataReceived,
 }: UseLiveKitVoiceOptions) {
   const roomRef = useRef<Room | null>(null);
@@ -28,8 +30,8 @@ export function useLiveKitVoice({
   const [aiAudioLevel, setAiAudioLevel] = useState(0);
 
   // Keep latest callbacks in refs so changes don't invalidate connect() callback
-  const callbacksRef = useRef({ onConnected, onDisconnected, onAiSpeakingChange, onDataReceived });
-  callbacksRef.current = { onConnected, onDisconnected, onAiSpeakingChange, onDataReceived };
+  const callbacksRef = useRef({ onConnected, onDisconnected, onAiSpeakingChange, onUserSpeakingChange, onDataReceived });
+  callbacksRef.current = { onConnected, onDisconnected, onAiSpeakingChange, onUserSpeakingChange, onDataReceived };
 
   const isMicMutedRef = useRef(isMicMuted);
   isMicMutedRef.current = isMicMuted;
@@ -255,6 +257,10 @@ export function useLiveKitVoice({
         if (!isAiSpeaking) {
           setAiAudioLevel(0);
         }
+
+        // Candidate is speaking if there is an active local speaker
+        const isUserSpeaking = speakers.some((s) => s.isLocal);
+        callbacksRef.current.onUserSpeakingChange?.(isUserSpeaking);
       });
 
       room.on(RoomEvent.DataReceived, (payload: Uint8Array) => {

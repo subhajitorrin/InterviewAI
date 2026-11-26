@@ -424,7 +424,7 @@ export function generateInterviewPlan(
         `Motivation for the ${targetRole} role`
       ],
       tailoredQuestions: [
-        `Welcome ${candidateName}! To kick things off, tell me about your background and what motivated you to pursue the ${targetRole} path.`,
+        `Welcome ${candidateName}! To kick things off, could you give me a short introduction about yourself, your background, and what you've been working on recently?`,
         `On your resume, you highlighted "${topProject.title}". Walk me through the architecture and how you handled high concurrency and state.`
       ]
     },

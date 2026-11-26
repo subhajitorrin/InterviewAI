@@ -292,8 +292,8 @@ export const useInterviewStore = create<SimpleInterviewState>((set, get) => ({
     const { candidateName, selectedRole, resumeFileName } = get();
     const hasResume = Boolean(resumeFileName && candidateName && candidateName !== 'Candidate');
     const greeting = hasResume
-      ? `Hi ${candidateName}! Welcome to your ${selectedRole} interview. I've reviewed your resume and prepared our plan. How are you doing today?`
-      : `Hi there! Welcome to your ${selectedRole} interview. I've prepared our interview plan. How are you doing today?`;
+      ? `Hi ${candidateName}! Welcome to your ${selectedRole} interview. To kick things off, could you give me a short introduction about yourself, your background, and what you've been working on recently?`
+      : `Hi there! Welcome to your ${selectedRole} interview. To kick things off, could you give me a short introduction about yourself, your background, and what you've been working on recently?`;
 
     set({
       currentPage: 'call',
@@ -359,6 +359,37 @@ export const useInterviewStore = create<SimpleInterviewState>((set, get) => ({
       isUserSpeaking: true,
       isAiSpeaking: false
     });
+
+    // Check if user is only doing an audio check or asking "Do you hear me?"
+    const isAudioCheck = /^(hey\s+)?(do|can)\s+you\s+hear\s+me|am\s+i\s+audible|hello\??/i.test(text.trim());
+    if (isAudioCheck) {
+      const confirmReply = "Yes, I can hear you loud and clear! Whenever you're ready, please go ahead with your introduction.";
+      setTimeout(() => {
+        set({ isUserSpeaking: false });
+        setTimeout(() => {
+          set({
+            subtitlesText: confirmReply,
+            isAiSpeaking: true,
+            messages: [
+              ...newMsgs,
+              {
+                id: `ai-${Date.now()}`,
+                sender: 'ai',
+                text: confirmReply,
+                time: formatTime(callSeconds + 1)
+              }
+            ]
+          });
+          appendConversationLog('AI (Sarah Mitchell)', confirmReply);
+          speakSpeechFallback(
+            confirmReply,
+            () => set({ isAiSpeaking: true }),
+            () => set({ isAiSpeaking: false })
+          );
+        }, 600);
+      }, 800);
+      return;
+    }
 
     // Determine next question from tailored interview plan
     setTimeout(() => {
