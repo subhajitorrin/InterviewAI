@@ -17,13 +17,17 @@ import {
   Video, 
   VideoOff, 
   PhoneOff,
-  AlertTriangle
+  AlertTriangle,
+  ChevronUp,
+  Check
 } from 'lucide-react';
 
 export const MeetingPage: React.FC = () => {
   const {
     isMicMuted,
     isVideoMuted,
+    selectedMicId,
+    setSelectedMicId,
     isAiSpeaking,
     candidateName,
     selectedRole,
@@ -44,6 +48,8 @@ export const MeetingPage: React.FC = () => {
   const [activeWarningApp, setActiveWarningApp] = useState<string | null>(null);
   const [isFaceDetected, setIsFaceDetected] = useState<boolean | null>(null);
   const [isAbsenceWarningActive, setIsAbsenceWarningActive] = useState<boolean>(false);
+  const [isMicMenuOpen, setIsMicMenuOpen] = useState<boolean>(false);
+  const micMenuRef = useRef<HTMLDivElement>(null);
 
   // Live OpenAI cost & latency metrics
   const [openAiMetrics, setOpenAiMetrics] = useState<{
@@ -141,14 +147,44 @@ export const MeetingPage: React.FC = () => {
   }, []);
 
   // Connect to LiveKit audio room for real-time AI voice conversation
-  const { connect, disconnect, sendData, isConnected, aiAudioLevel } = useLiveKitVoice({
+  const { 
+    connect, 
+    disconnect, 
+    sendData, 
+    isConnected, 
+    aiAudioLevel,
+    availableMics,
+    currentAudioDeviceId,
+    switchMicrophone,
+    refreshAudioDevices
+  } = useLiveKitVoice({
     roomName: 'interview-room-1',
     participantName: candidateName || 'Candidate',
     isMicMuted,
+    selectedMicId,
     onAiSpeakingChange: handleAiSpeakingChange,
     onUserSpeakingChange: handleUserSpeakingChange,
     onDataReceived: handleDataReceived,
   });
+
+  const handleSelectMicrophone = async (deviceId: string) => {
+    setSelectedMicId(deviceId);
+    await switchMicrophone(deviceId);
+    setIsMicMenuOpen(false);
+  };
+
+  // Close microphone picker popup on click outside
+  useEffect(() => {
+    if (!isMicMenuOpen) return;
+    refreshAudioDevices();
+    const handleClickOutside = (event: MouseEvent) => {
+      if (micMenuRef.current && !micMenuRef.current.contains(event.target as Node)) {
+        setIsMicMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isMicMenuOpen, refreshAudioDevices]);
 
   useEffect(() => {
     sendDataRef.current = sendData;
@@ -431,8 +467,6 @@ export const MeetingPage: React.FC = () => {
             if (now - lastAbsenceWarningTimeRef.current > 12000) {
               lastAbsenceWarningTimeRef.current = now;
               const warnPresence = "You aren't visible in front of the camera. Please make sure you are in frame.";
-              appendConversationLog('SYSTEM ALERT', 'Candidate out of frame for >5 seconds');
-              appendConversationLog('AI (Sarah Mitchell)', warnPresence);
 
               if (livekitConnectedRef.current) {
                 sendDataRef.current({
@@ -441,6 +475,8 @@ export const MeetingPage: React.FC = () => {
                   reason: 'Candidate out of frame for >5 seconds',
                 });
               } else {
+                appendConversationLog('SYSTEM ALERT', 'Candidate out of frame for >5 seconds');
+                appendConversationLog('AI (Sarah Mitchell)', warnPresence);
                 speakSpeechFallback(warnPresence);
               }
             }
@@ -563,18 +599,86 @@ export const MeetingPage: React.FC = () => {
 
       {/* Bottom Control Bar */}
       <div className="h-16 flex items-center justify-center gap-4">
-        {/* Mute / Unmute */}
-        <button
-          onClick={toggleMic}
-          className={`w-12 h-12 rounded-full flex items-center justify-center transition-all cursor-pointer ${
-            isMicMuted
-              ? 'bg-rose-600 hover:bg-rose-500 text-white shadow-lg shadow-rose-600/30'
-              : 'bg-[#2B303C] hover:bg-slate-700 text-white'
-          }`}
-          title={isMicMuted ? 'Unmute' : 'Mute'}
-        >
-          {isMicMuted ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
-        </button>
+        {/* Google Meet-Style Split Microphone Pill Control */}
+        <div className="relative inline-flex items-center" ref={micMenuRef}>
+          {/* Mute / Unmute Button (Left Side) */}
+          <button
+            onClick={toggleMic}
+            className={`h-12 pl-4 pr-2.5 rounded-l-full flex items-center justify-center transition-all cursor-pointer ${
+              isMicMuted
+                ? 'bg-rose-600 hover:bg-rose-500 text-white shadow-lg shadow-rose-600/30'
+                : 'bg-[#2B303C] hover:bg-slate-700 text-white'
+            }`}
+            title={isMicMuted ? 'Turn on microphone' : 'Turn off microphone'}
+          >
+            {isMicMuted ? <MicOff className="w-5 h-5 text-white" /> : <Mic className="w-5 h-5 text-white" />}
+          </button>
+
+          {/* Vertical Divider Line */}
+          <div className={`w-[1px] h-6 ${isMicMuted ? 'bg-rose-400/40' : 'bg-neutral-600/80'}`} />
+
+          {/* Microphone Selector Chevron (Right Side) */}
+          <button
+            onClick={() => setIsMicMenuOpen((prev) => !prev)}
+            className={`h-12 pr-3 pl-2 rounded-r-full flex items-center justify-center transition-all cursor-pointer ${
+              isMicMuted
+                ? 'bg-rose-600 hover:bg-rose-500 text-white shadow-lg shadow-rose-600/30'
+                : isMicMenuOpen
+                ? 'bg-slate-700 text-sky-400'
+                : 'bg-[#2B303C] hover:bg-slate-700 text-neutral-300 hover:text-white'
+            }`}
+            title="Select microphone"
+          >
+            <ChevronUp className={`w-4 h-4 transition-transform duration-200 ${isMicMenuOpen ? 'rotate-180' : ''}`} />
+          </button>
+
+          {/* Google Meet Audio Settings Popover Menu */}
+          {isMicMenuOpen && (
+            <div className="absolute bottom-16 left-0 mb-2 w-72 sm:w-80 bg-[#1A1D24]/95 backdrop-blur-xl border border-neutral-700/80 rounded-2xl shadow-2xl p-2.5 z-50 animate-in fade-in zoom-in-95 duration-150">
+              <div className="flex items-center justify-between px-2.5 py-1.5 border-b border-neutral-800 mb-1.5">
+                <div className="flex items-center gap-2 text-xs font-semibold text-neutral-300">
+                  <Mic className="w-3.5 h-3.5 text-neutral-400" />
+                  <span>MICROPHONE</span>
+                </div>
+                <span className="text-[10px] text-neutral-500 font-mono">
+                  {availableMics.length} {availableMics.length === 1 ? 'device' : 'devices'}
+                </span>
+              </div>
+
+              <div className="max-h-56 overflow-y-auto space-y-1 py-0.5 custom-scrollbar">
+                {availableMics.length === 0 ? (
+                  <div className="px-3 py-2 text-xs text-neutral-400">
+                    Default System Microphone
+                  </div>
+                ) : (
+                  availableMics.map((device, idx) => {
+                    const isSelected =
+                      (selectedMicId && selectedMicId === device.deviceId) ||
+                      (currentAudioDeviceId && currentAudioDeviceId === device.deviceId) ||
+                      (!selectedMicId && idx === 0);
+
+                    const label = device.label || `Microphone ${idx + 1}`;
+
+                    return (
+                      <button
+                        key={device.deviceId || idx}
+                        onClick={() => handleSelectMicrophone(device.deviceId)}
+                        className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs text-left transition-colors cursor-pointer ${
+                          isSelected
+                            ? 'bg-white/10 text-white font-medium'
+                            : 'text-neutral-300 hover:bg-white/5 hover:text-white'
+                        }`}
+                      >
+                        <span className="truncate pr-2">{label}</span>
+                        {isSelected && <Check className="w-4 h-4 text-emerald-400 shrink-0" />}
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          )}
+        </div>
 
         {/* Video On / Off */}
         <button

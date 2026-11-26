@@ -137,6 +137,8 @@ interface SimpleInterviewState {
   // Page 2: Interview Call State
   isMicMuted: boolean;
   isVideoMuted: boolean;
+  selectedMicId: string;
+  setSelectedMicId: (id: string) => void;
   showCaptions: boolean;
   isAiSpeaking: boolean;
   isUserSpeaking: boolean;
@@ -279,6 +281,15 @@ export const useInterviewStore = create<SimpleInterviewState>((set, get) => ({
   // Call state
   isMicMuted: false,
   isVideoMuted: false,
+  selectedMicId: typeof window !== 'undefined' ? localStorage.getItem('interview_selected_mic') || 'default' : 'default',
+  setSelectedMicId: (id: string) => {
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('interview_selected_mic', id);
+      } catch {}
+    }
+    set({ selectedMicId: id });
+  },
   showCaptions: true,
   isAiSpeaking: false,
   isUserSpeaking: false,

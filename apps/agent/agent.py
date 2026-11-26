@@ -91,14 +91,14 @@ async def entrypoint(ctx: JobContext):
     await ctx.connect(auto_subscribe=AutoSubscribe.SUBSCRIBE_ALL)
 
     # Ultra-low latency pipeline configuration:
-    # 1. Deepgram Nova-3 with no_delay, interim_results, and aggressive endpointing
+    # 1. Deepgram Nova-3 with standard conversational endpointing (300ms)
     stt_plugin = deepgram.STT(
         model="nova-3",
         language="en-US",
         no_delay=True,
         interim_results=True,
         filler_words=False,
-        endpointing_ms=15,
+        endpointing_ms=300,
     )
     # 2. Fast token streaming with gpt-4o-mini capped at 120 completion tokens
     llm_plugin = openai.LLM(
@@ -106,9 +106,9 @@ async def entrypoint(ctx: JobContext):
         max_completion_tokens=120,
         temperature=0.6,
     )
-    # 3. Fast Silero VAD end-of-speech detection (reduced from 550ms default to 250ms)
+    # 3. Silero VAD end-of-speech detection (450ms allows natural conversational thought pauses)
     vad_plugin = silero.VAD.load(
-        min_silence_duration=0.25,
+        min_silence_duration=0.45,
         prefix_padding_duration=0.2,
         activation_threshold=0.45,
     )
@@ -128,10 +128,10 @@ async def entrypoint(ctx: JobContext):
         tts=tts_engine,
     )
 
-    # 4. Turn handling: reduced endpointing delay from 500ms down to 150ms for instant response
+    # 4. Turn handling: min_delay 0.6s gives candidate natural breathing room without being abruptly interrupted
     session = AgentSession(
         turn_handling=TurnHandlingOptions(
-            endpointing=EndpointingOptions(min_delay=0.15, max_delay=1.2),
+            endpointing=EndpointingOptions(min_delay=0.6, max_delay=1.6),
             interruption=InterruptionOptions(enabled=True),
         )
     )
@@ -418,18 +418,18 @@ async def entrypoint(ctx: JobContext):
                 f"- Skills: {skills_str}\n"
                 f"- Highlighted Project: {top_project}\n"
                 f"{exp_clause}\n\n"
-                "AUDIO CHECKS, MIC TESTS & CLARIFICATIONS (CRITICAL - HIGHEST PRIORITY):\n"
-                "- If the candidate asks if you can hear them (e.g., 'Can you hear me?', 'Do you hear me?', 'Am I audible?', 'Hello?', 'Testing mic', 'Are you there?'):\n"
-                "  Reply clearly: 'Yes, I can hear you loud and clear! Whenever you are ready, please go ahead with your introduction.' (or prompt them for whichever question is currently active).\n"
-                "  DO NOT advance to the next question! DO NOT assume their introduction or background is done! You MUST wait for their actual introduction or answer before proceeding.\n"
-                "- If the candidate asks you to repeat or clarify ('Can you repeat that?', 'What did you ask?', 'What do you mean by...?'):\n"
-                "  Politely repeat or clarify the current question in 1 sentence. Never jump ahead to the next stage.\n"
-                "- If the candidate says 'One second', 'Hold on', or needs a moment:\n"
-                "  Reply: 'Take your time, whenever you are ready!' and stay on the current question.\n"
-                "- NEVER say 'Thanks for sharing that background' or acknowledge an answer unless the candidate ACTUALLY introduced themselves or answered the question!\n\n"
+                "CANDIDATE INTRODUCTION & PROGRESSION RULES:\n"
+                "- When the candidate shares their introduction (mentioning their experience, years in tech, SaaS products, roles, projects, technologies, or background), OR if the candidate says they already introduced themselves (e.g., 'I already told you', 'I already introduced myself', 'I already gave my intro'):\n"
+                f"  Immediately accept it, acknowledge warmly in 1 brief sentence (e.g., 'Thanks for sharing that background, {candidate_name}!'), and immediately ask Question 1: '{q_project}'\n"
+                "  DO NOT ask them to introduce themselves again! NEVER ask for the introduction a second time once they have spoken about their experience.\n\n"
+                "AUDIO CHECKS & CLARIFICATIONS:\n"
+                "- ONLY if the candidate's ENTIRE message is purely asking if you can hear them (e.g., only 'Can you hear me?', 'Hello?', 'Testing mic', 'Am I audible?') WITHOUT mentioning any work or experience, reply clearly: 'Yes, I can hear you loud and clear! Whenever you are ready, please go ahead with your introduction.'\n"
+                "- If the candidate mentions ANY work, experience, SaaS products, coding, or says they already introduced themselves, it is NEVER an audio check. Acknowledge warmly and ask Question 1.\n"
+                "- If the candidate asks you to repeat or clarify ('Can you repeat that?', 'What did you ask?'): Politely repeat the current question in 1 sentence.\n"
+                "- If the candidate says 'One second', 'Hold on', or needs a moment: Reply: 'Take your time, whenever you are ready!' and stay on the current question.\n\n"
                 "PROGRESSION RULES (WHEN CANDIDATE ANSWERS A QUESTION):\n"
                 "1. NO LINGERING ON TOPICS:\n"
-                "   - Once the candidate ACTUALLY answers a question or introduces themselves, give exactly ONE brief acknowledgment sentence (e.g., 'Got it, that makes sense.', 'Understood, solid architectural choice.', 'Thanks for that clear explanation.').\n"
+                "   - Once the candidate answers a question or introduces themselves, give exactly ONE brief acknowledgment sentence (e.g., 'Got it, that makes sense.', 'Understood, solid architectural choice.', 'Thanks for that clear explanation.').\n"
                 "   - Immediately follow with a natural transition segue into the NEXT scheduled question in the agenda.\n"
                 "   - Do NOT ask repetitive or drill-down follow-up questions on the same tool or topic.\n"
                 "2. RESPONSE FORMAT & LENGTH:\n"
@@ -441,8 +441,7 @@ async def entrypoint(ctx: JobContext):
                 "INTERVIEW AGENDA & STAGES:\n"
                 "The interview starts with your kickoff asking for a short introduction.\n"
                 f"- Stage 1 (Candidate Introduction):\n"
-                f"  Wait for the candidate to actually introduce themselves. (If they only ask 'Do you hear me?' or check mic, confirm audio and prompt them for their introduction. Do NOT advance yet!).\n"
-                f"  ONCE they introduce their background: Acknowledge warmly in 1 sentence ('Thanks for that overview, {candidate_name}!') and ask Question 1: '{q_project}'\n"
+                f"  When the candidate introduces their background, products, or experience (or states they already introduced themselves): Acknowledge warmly in 1 sentence ('Thanks for that overview, {candidate_name}!') and ask Question 1: '{q_project}'\n"
                 f"- Stage 2 (Project Architecture Deep Dive):\n"
                 f"  Wait for their project architecture response. ONCE they answer: Acknowledge in 1 sentence, segue, and ask Question 2: '{q_tech}'\n"
                 f"- Stage 3 (Core Engineering & Tech Stack):\n"

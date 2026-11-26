@@ -6,6 +6,7 @@ export interface UseLiveKitVoiceOptions {
   participantName?: string;
   metadata?: string;
   isMicMuted?: boolean;
+  selectedMicId?: string;
   onConnected?: () => void;
   onDisconnected?: () => void;
   onAiSpeakingChange?: (isSpeaking: boolean) => void;
@@ -18,6 +19,7 @@ export function useLiveKitVoice({
   participantName = 'Candidate',
   metadata,
   isMicMuted = false,
+  selectedMicId,
   onConnected,
   onDisconnected,
   onAiSpeakingChange,
@@ -28,6 +30,8 @@ export function useLiveKitVoice({
   const [isConnected, setIsConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [aiAudioLevel, setAiAudioLevel] = useState(0);
+  const [availableMics, setAvailableMics] = useState<MediaDeviceInfo[]>([]);
+  const [currentAudioDeviceId, setCurrentAudioDeviceId] = useState<string>(selectedMicId || 'default');
 
   // Keep latest callbacks in refs so changes don't invalidate connect() callback
   const callbacksRef = useRef({ onConnected, onDisconnected, onAiSpeakingChange, onUserSpeakingChange, onDataReceived });
@@ -301,16 +305,68 @@ export function useLiveKitVoice({
       // Enable microphone according to current mute state
       try {
         await room.localParticipant.setMicrophoneEnabled(!isMicMutedRef.current);
+        if (selectedMicId && selectedMicId !== 'default') {
+          try {
+            await room.switchActiveDevice('audioinput', selectedMicId, true);
+            setCurrentAudioDeviceId(selectedMicId);
+          } catch (switchErr) {
+            console.warn('[LiveKit] Initial switchActiveDevice error:', switchErr);
+          }
+        }
       } catch (micErr: any) {
         console.error('[LiveKit] Microphone enable error:', micErr);
       }
+      refreshAudioDevices();
     } catch (err: any) {
       console.warn('[LiveKit] Connection error:', err.message);
       setError(err.message);
     } finally {
       isConnectingRef.current = false;
     }
-  }, [roomName, participantName, cleanupAudioElements]);
+  }, [roomName, participantName, metadata, selectedMicId, cleanupAudioElements]);
+
+  const refreshAudioDevices = useCallback(async () => {
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.enumerateDevices) {
+      return;
+    }
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const mics = devices.filter((d) => d.kind === 'audioinput');
+      setAvailableMics(mics);
+    } catch (err) {
+      console.warn('[LiveKit] Failed to enumerate audio devices:', err);
+    }
+  }, []);
+
+  const switchMicrophone = useCallback(async (deviceId: string): Promise<boolean> => {
+    setCurrentAudioDeviceId(deviceId);
+    if (roomRef.current) {
+      try {
+        const success = await roomRef.current.switchActiveDevice('audioinput', deviceId, true);
+        console.log(`[LiveKit] Switched microphone to deviceId: ${deviceId}, success: ${success}`);
+        await refreshAudioDevices();
+        return success;
+      } catch (err) {
+        console.warn('[LiveKit] Failed to switch active microphone:', err);
+        return false;
+      }
+    }
+    return true;
+  }, [refreshAudioDevices]);
+
+  // Listen for newly connected or disconnected audio devices (AirPods, USB mic, etc.)
+  useEffect(() => {
+    refreshAudioDevices();
+    if (typeof navigator !== 'undefined' && navigator.mediaDevices?.addEventListener) {
+      const onDeviceChange = () => {
+        refreshAudioDevices();
+      };
+      navigator.mediaDevices.addEventListener('devicechange', onDeviceChange);
+      return () => {
+        navigator.mediaDevices.removeEventListener('devicechange', onDeviceChange);
+      };
+    }
+  }, [refreshAudioDevices]);
 
   const sendData = useCallback(async (data: any) => {
     if (roomRef.current?.localParticipant) {
@@ -346,6 +402,10 @@ export function useLiveKitVoice({
     sendData,
     isConnected,
     aiAudioLevel,
+    availableMics,
+    currentAudioDeviceId,
+    switchMicrophone,
+    refreshAudioDevices,
     error,
   };
 }
