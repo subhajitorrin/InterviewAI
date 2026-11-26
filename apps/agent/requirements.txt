@@ -1,0 +1,10 @@
+livekit>=1.2.1
+livekit-agents>=1.8.13
+livekit-plugins-deepgram>=1.8.13
+livekit-plugins-openai>=1.8.13
+livekit-plugins-silero>=1.8.13
+opencv-python-headless>=4.10.0
+numpy>=1.26.0
+python-dotenv>=1.0.0
+piper-tts>=1.2.0
+sounddevice>=0.4.6
