@@ -1,12 +1,12 @@
-# InterviewAI — Real-Time Autonomous AI Technical Interviewer
+# InterviewAI — Open Source AI Technical Interviewer
 
-> **An autonomous, resume-aware mock technical interview platform.** Powered by full-duplex WebRTC audio streaming, dynamic resume indexing, computer vision presence verification, and native desktop environment monitoring.
+> **An open-source, autonomous, resume-aware mock technical interview platform.** Powered by full-duplex WebRTC audio streaming, dynamic resume indexing, computer vision presence verification, and native desktop environment monitoring.
 
 ---
 
-## 📌 Executive Summary (For Recruiters & Hiring Managers)
+## 📌 Executive Summary (For Recruiters, Hiring Managers & Developers)
 
-**InterviewAI** is an AI-powered technical interviewer application packaged as a native desktop client. Unlike traditional static question-and-answer chatbots, InterviewAI conducts **natural, spoken-dialogue technical interviews in real-time** with sub-second latency.
+**InterviewAI** is an open-source AI-powered technical interviewer application packaged as a native desktop client. Unlike traditional static question-and-answer chatbots, InterviewAI conducts **natural, spoken-dialogue technical interviews in real-time** with sub-second latency.
 
 It dynamically inspects the candidate's uploaded resume (PDF/text), tailors in-depth technical questions to their real-world project experience, guides them through an autonomous **4-step onboarding protocol**, and continuously monitors camera presence and active desktop applications to simulate an authentic, professional technical assessment.
 
